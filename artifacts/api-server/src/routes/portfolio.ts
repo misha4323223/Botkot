@@ -49,27 +49,29 @@ router.get("/portfolio", async (req, res): Promise<void> => {
       s.isSandbox
     );
 
-    const positions = (data.positions ?? []).map((p) => {
-      const avg = parseMoneyValue(p.averagePositionPrice);
-      const curr = parseMoneyValue(p.currentPrice);
-      const qty = parseMoneyValue(p.quantity);
-      const pnl = parseMoneyValue(p.expectedYield);
-      const currValue = curr * qty;
-      const pnlPct = avg > 0 ? (pnl / (avg * qty)) * 100 : 0;
-
-      return {
-        figi: p.figi,
-        ticker: p.figi,
-        name: p.instrumentType ?? p.figi,
-        quantity: qty,
-        averagePrice: avg,
-        currentPrice: curr,
-        currentValue: currValue,
-        unrealizedPnl: pnl,
-        unrealizedPnlPercent: pnlPct,
-        instrumentType: p.instrumentType ?? "stock",
-      };
-    });
+    const all = [...(data.positions ?? []), ...(data.virtualPositions ?? [])];
+    const positions = all
+      .filter((p) => (p.instrumentType ?? "share") !== "currency")
+      .map((p) => {
+        const avg = parseMoneyValue(p.averagePositionPrice);
+        const curr = parseMoneyValue(p.currentPrice);
+        const qty = parseMoneyValue(p.quantity);
+        const pnl = parseMoneyValue(p.expectedYield);
+        const currValue = curr * qty;
+        const pnlPct = avg > 0 ? (pnl / (avg * qty)) * 100 : 0;
+        return {
+          figi: p.figi,
+          ticker: p.ticker ?? p.figi,
+          name: p.instrumentType ?? p.figi,
+          quantity: qty,
+          averagePrice: avg,
+          currentPrice: curr,
+          currentValue: currValue,
+          unrealizedPnl: pnl,
+          unrealizedPnlPercent: pnlPct,
+          instrumentType: p.instrumentType ?? "share",
+        };
+      });
 
     res.json({
       positions,
@@ -104,14 +106,18 @@ router.get("/portfolio/summary", async (req, res): Promise<void> => {
     const cashRub = parseMoneyValue(data.totalAmountCurrencies);
     const invested = totalValue > 0 ? totalValue - pnl : 0;
     const pnlPct = invested > 0 ? (pnl / invested) * 100 : 0;
+    const dailyPnl = parseMoneyValue(data.dailyYield);
+    const dailyPnlPct = parseMoneyValue(data.dailyYieldRelative) * 100;
+    const allPositions = [...(data.positions ?? []), ...(data.virtualPositions ?? [])]
+      .filter((p) => (p.instrumentType ?? "share") !== "currency");
 
     res.json({
       totalValue,
       totalPnl: pnl,
       totalPnlPercent: pnlPct,
-      dailyPnl: 0,
-      dailyPnlPercent: 0,
-      positionsCount: (data.positions ?? []).length,
+      dailyPnl,
+      dailyPnlPercent: dailyPnlPct,
+      positionsCount: allPositions.length,
       cashRub,
     });
   } catch (err) {
@@ -129,13 +135,17 @@ interface TinkoffAccount {
 
 interface TinkoffPortfolioResponse {
   positions?: TinkoffPosition[];
+  virtualPositions?: TinkoffPosition[];
   totalAmountPortfolio?: { units?: string; nano?: number; currency?: string };
   totalAmountCurrencies?: { units?: string; nano?: number; currency?: string };
   expectedYield?: { units?: string; nano?: number };
+  dailyYield?: { units?: string; nano?: number };
+  dailyYieldRelative?: { units?: string; nano?: number };
 }
 
 interface TinkoffPosition {
   figi: string;
+  ticker?: string;
   instrumentType?: string;
   quantity?: { units?: string; nano?: number };
   averagePositionPrice?: { units?: string; nano?: number; currency?: string };

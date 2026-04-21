@@ -9,13 +9,24 @@ import { randomUUID } from "crypto";
 
 interface AgentContext {
   cashRub: number;
-  positions: { figi: string; qty: number; avg: number; curr: number; pnl: number }[];
+  positions: { figi: string; ticker: string; qty: number; avg: number; curr: number; pnl: number }[];
 }
 
-async function getAccountContext(token: string, accountId: string, isSandbox: boolean): Promise<AgentContext> {
+interface RawPos {
+  figi: string;
+  ticker?: string;
+  instrumentType?: string;
+  quantity?: { units?: string; nano?: number };
+  averagePositionPrice?: { units?: string; nano?: number };
+  currentPrice?: { units?: string; nano?: number };
+  expectedYield?: { units?: string; nano?: number };
+}
+
+async function getAccountContext(token: string, accountId: string, isSandbox: boolean): Promise<AgentContext & { positions: (AgentContext["positions"][number] & { ticker: string })[] }> {
   try {
     const data = await tinkoffPost<{
-      positions?: { figi: string; quantity?: { units?: string; nano?: number }; averagePositionPrice?: { units?: string; nano?: number }; currentPrice?: { units?: string; nano?: number }; expectedYield?: { units?: string; nano?: number } }[];
+      positions?: RawPos[];
+      virtualPositions?: RawPos[];
       totalAmountCurrencies?: { units?: string; nano?: number };
     }>(
       "/tinkoff.public.invest.api.contract.v1.OperationsService/GetPortfolio",
@@ -23,9 +34,12 @@ async function getAccountContext(token: string, accountId: string, isSandbox: bo
       token,
       isSandbox
     );
-    const positions = (data.positions ?? [])
+    const all = [...(data.positions ?? []), ...(data.virtualPositions ?? [])];
+    const positions = all
+      .filter(p => (p.instrumentType ?? "share") !== "currency")
       .map(p => ({
         figi: p.figi,
+        ticker: p.ticker ?? p.figi,
         qty: parseMoneyValue(p.quantity),
         avg: parseMoneyValue(p.averagePositionPrice),
         curr: parseMoneyValue(p.currentPrice),
@@ -177,7 +191,7 @@ export async function runAgentCycle(specificFigi: string | null) {
   const myPosition = ctx.positions.find(p => p.figi === target.figi);
   const positionsSummary = ctx.positions.length === 0
     ? "Открытых позиций нет."
-    : ctx.positions.map(p => `  ${p.figi}: ${p.qty} шт. по ${p.avg.toFixed(2)}₽ (тек. ${p.curr.toFixed(2)}₽, P&L ${p.pnl >= 0 ? "+" : ""}${p.pnl.toFixed(2)}₽)`).join("\n");
+    : ctx.positions.map(p => `  ${p.ticker}: ${p.qty} шт. по ${p.avg.toFixed(2)}₽ (тек. ${p.curr.toFixed(2)}₽, P&L ${p.pnl >= 0 ? "+" : ""}${p.pnl.toFixed(2)}₽)`).join("\n");
   const myPosSummary = myPosition
     ? `У тебя уже есть ${myPosition.qty} шт. по средней ${myPosition.avg.toFixed(2)}₽, P&L ${myPosition.pnl >= 0 ? "+" : ""}${myPosition.pnl.toFixed(2)}₽.`
     : "По этой бумаге позиции нет.";
