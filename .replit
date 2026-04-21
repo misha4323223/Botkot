@@ -28,6 +28,10 @@ localPort = 8081
 externalPort = 80
 
 [[ports]]
+localPort = 8082
+externalPort = 3002
+
+[[ports]]
 localPort = 19233
 externalPort = 3000
 
@@ -39,3 +43,4 @@ channel = "stable-25_05"
 [userenv.shared]
 APP_ENCRYPTION_KEY = "Zi1CFeXA4/+i2dkLRyszW/NURpLOtKBsZDtzveUSj7Y="
 APP_PASSWORD = "storm-echo-shadow-4173"
+NEON_DATABASE_URL = "postgresql://neondb_owner:npg_nJXMswL9g5iy@ep-small-silence-anfnbyoi-pooler.c-6.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
