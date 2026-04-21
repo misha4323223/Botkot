@@ -16,7 +16,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
-import { Bot, Play, Square, Trash2, TerminalSquare, Search, Plus, Check } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { Bot, Play, Square, Trash2, TerminalSquare, Search, Plus, Check, ShieldAlert } from "lucide-react";
 
 export default function AgentPage() {
   const queryClient = useQueryClient();
@@ -26,6 +28,7 @@ export default function AgentPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [allowTrading, setAllowTrading] = useState(false);
   
   const { data: status, isLoading: isStatusLoading } = useGetAgentStatus();
   const { data: watchlist, isLoading: isWatchlistLoading } = useGetWatchlist();
@@ -67,7 +70,7 @@ export default function AgentPage() {
       const response = await fetch("/api/agent/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ figi: figi || null, executeIfConfident: true })
+        body: JSON.stringify({ figi: figi || null, executeIfConfident: allowTrading })
       });
       if (!response.body) throw new Error("No response body");
       const reader = response.body.getReader();
@@ -219,13 +222,34 @@ export default function AgentPage() {
 
         {/* Live Analysis Stream */}
         <Card className="bg-[#0a0a0a] border-border flex flex-col lg:col-span-2 min-h-[320px]">
-          <CardHeader className="border-b border-border/50 pb-3 pt-4 px-4 flex flex-row items-center justify-between">
-            <div className="flex items-center text-primary">
+          <CardHeader className="border-b border-border/50 pb-3 pt-4 px-4 flex flex-row items-center justify-between gap-3">
+            <div className="flex items-center text-primary shrink-0">
               <TerminalSquare className="w-4 h-4 mr-2" />
               <CardTitle className="text-xs font-mono tracking-widest uppercase">Live Thought Stream</CardTitle>
             </div>
-            {isStreaming && <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />}
+            <div className="flex items-center gap-2">
+              {isStreaming && <div className="h-2 w-2 rounded-full bg-primary animate-pulse shrink-0" />}
+            </div>
           </CardHeader>
+
+          {/* Trading toggle */}
+          <div className={`px-4 py-2.5 border-b flex items-center justify-between gap-3 transition-colors ${allowTrading ? "border-yellow-600/50 bg-yellow-950/30" : "border-border/30 bg-muted/5"}`}>
+            <div className="flex items-center gap-2 min-w-0">
+              <ShieldAlert className={`w-4 h-4 shrink-0 ${allowTrading ? "text-yellow-400" : "text-muted-foreground"}`} />
+              <div className="min-w-0">
+                <Label htmlFor="allow-trading" className={`text-xs font-medium cursor-pointer ${allowTrading ? "text-yellow-400" : "text-muted-foreground"}`}>
+                  {allowTrading ? "Торговля включена — ИИ может покупать/продавать" : "Только анализ (без сделок)"}
+                </Label>
+              </div>
+            </div>
+            <Switch
+              id="allow-trading"
+              checked={allowTrading}
+              onCheckedChange={setAllowTrading}
+              className={allowTrading ? "data-[state=checked]:bg-yellow-500" : ""}
+            />
+          </div>
+
           <CardContent className="p-0 flex-1 relative min-h-[260px]">
             <div 
               ref={streamRef}
@@ -233,7 +257,7 @@ export default function AgentPage() {
               style={{ textShadow: "0 0 5px rgba(0,255,157,0.3)" }}
             >
               {streamData ? streamData : (
-                <div className="text-muted-foreground/50 italic h-full flex items-center justify-center text-center text-xs">
+                <div className="text-muted-foreground/50 italic h-full flex items-center justify-center text-center text-xs px-4">
                   Нажмите «Анализ» у акции или «Анализировать всё» чтобы запустить ИИ
                 </div>
               )}
