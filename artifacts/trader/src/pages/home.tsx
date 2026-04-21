@@ -24,6 +24,58 @@ export default function Home() {
         )}
       </div>
 
+      {/* Money distribution */}
+      <Card className="bg-card border-card-border p-6">
+        <h2 className="text-sm font-medium text-muted-foreground mb-4">Где сейчас деньги</h2>
+        {isLoadingSummary || isLoadingPortfolio ? (
+          <Skeleton className="h-16 w-full" />
+        ) : (() => {
+          const cash = summary?.cashRub ?? 0;
+          const invested = (portfolio?.positions ?? []).reduce((s, p) => s + p.currentValue, 0);
+          const total = cash + invested;
+          const cashPct = total > 0 ? (cash / total) * 100 : 0;
+          const invPct = total > 0 ? (invested / total) * 100 : 0;
+          return (
+            <div className="space-y-4">
+              <div className="flex items-end justify-between">
+                <div>
+                  <div className="text-xs text-muted-foreground">Свободные деньги</div>
+                  <div className="text-2xl font-bold font-mono">₽{cash.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                  <div className="text-xs text-muted-foreground">{cashPct.toFixed(1)}%</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xs text-muted-foreground">В акциях</div>
+                  <div className="text-2xl font-bold font-mono">₽{invested.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                  <div className="text-xs text-muted-foreground">{invPct.toFixed(1)}%</div>
+                </div>
+              </div>
+              <div className="flex h-3 w-full overflow-hidden rounded-full bg-muted">
+                <div className="bg-primary" style={{ width: `${cashPct}%` }} />
+                <div className="bg-success" style={{ width: `${invPct}%` }} />
+              </div>
+              {(portfolio?.positions ?? []).length > 0 && (
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 pt-2">
+                  {portfolio!.positions.map((p) => (
+                    <div key={p.figi} className="flex items-center justify-between bg-muted/40 rounded px-3 py-2">
+                      <div>
+                        <div className="text-sm font-semibold">{p.ticker}</div>
+                        <div className="text-xs text-muted-foreground">{p.quantity} шт.</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-sm font-mono">₽{p.currentValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                        <div className={`text-xs font-mono ${p.unrealizedPnl >= 0 ? "text-success" : "text-destructive"}`}>
+                          {p.unrealizedPnl >= 0 ? "+" : ""}{p.unrealizedPnlPercent.toFixed(2)}%
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+      </Card>
+
       {/* Stats Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="bg-card border-card-border">
