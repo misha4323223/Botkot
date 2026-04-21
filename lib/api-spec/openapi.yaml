@@ -3,13 +3,26 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: AI Trader — Tinkoff Invest API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: settings
+    description: App settings and API token
+  - name: portfolio
+    description: Portfolio and account operations
+  - name: market
+    description: Market data and instruments
+  - name: orders
+    description: Order management
+  - name: agent
+    description: AI trading agent
+  - name: tradelog
+    description: Trade history and logs
+
 paths:
   /healthz:
     get:
@@ -24,6 +37,382 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /settings:
+    get:
+      operationId: getSettings
+      tags: [settings]
+      summary: Get app settings (token masked)
+      responses:
+        "200":
+          description: App settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Settings"
+    put:
+      operationId: updateSettings
+      tags: [settings]
+      summary: Update app settings including API token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSettingsBody"
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Settings"
+
+  /portfolio:
+    get:
+      operationId: getPortfolio
+      tags: [portfolio]
+      summary: Get portfolio positions from Tinkoff
+      responses:
+        "200":
+          description: Portfolio positions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Portfolio"
+        "400":
+          description: API token not configured or error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /portfolio/accounts:
+    get:
+      operationId: listAccounts
+      tags: [portfolio]
+      summary: List Tinkoff investment accounts
+      responses:
+        "200":
+          description: List of accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Account"
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /portfolio/summary:
+    get:
+      operationId: getPortfolioSummary
+      tags: [portfolio]
+      summary: Get portfolio summary (total value, P&L, daily change)
+      responses:
+        "200":
+          description: Portfolio summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortfolioSummary"
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /market/instruments:
+    get:
+      operationId: searchInstruments
+      tags: [market]
+      summary: Search instruments (stocks, ETFs)
+      parameters:
+        - name: query
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [stock, etf, bond, currency]
+      responses:
+        "200":
+          description: List of instruments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Instrument"
+
+  /market/instruments/{figi}/candles:
+    get:
+      operationId: getCandles
+      tags: [market]
+      summary: Get price candles for an instrument
+      parameters:
+        - name: figi
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: interval
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [1min, 5min, 15min, hour, day, week, month]
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: List of candles
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Candle"
+
+  /market/instruments/{figi}/price:
+    get:
+      operationId: getLastPrice
+      tags: [market]
+      summary: Get last price for an instrument
+      parameters:
+        - name: figi
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Last price
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LastPrice"
+
+  /orders:
+    get:
+      operationId: listOrders
+      tags: [orders]
+      summary: List active orders
+      responses:
+        "200":
+          description: List of active orders
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Order"
+    post:
+      operationId: placeOrder
+      tags: [orders]
+      summary: Place a buy or sell order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlaceOrderBody"
+      responses:
+        "201":
+          description: Order placed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "400":
+          description: Order error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /orders/{orderId}:
+    delete:
+      operationId: cancelOrder
+      tags: [orders]
+      summary: Cancel an active order
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Cancelled
+        "404":
+          description: Order not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /tradelog:
+    get:
+      operationId: listTradeLogs
+      tags: [tradelog]
+      summary: List trade log entries (AI decisions and executed trades)
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Trade log entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TradeLogEntry"
+
+  /tradelog/stats:
+    get:
+      operationId: getTradeStats
+      tags: [tradelog]
+      summary: Get trading statistics (win rate, total trades, PnL)
+      responses:
+        "200":
+          description: Trade statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TradeStats"
+
+  /agent/status:
+    get:
+      operationId: getAgentStatus
+      tags: [agent]
+      summary: Get current AI agent status (running, paused, last action)
+      responses:
+        "200":
+          description: Agent status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentStatus"
+
+  /agent/start:
+    post:
+      operationId: startAgent
+      tags: [agent]
+      summary: Start the AI trading agent
+      responses:
+        "200":
+          description: Agent started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentStatus"
+
+  /agent/stop:
+    post:
+      operationId: stopAgent
+      tags: [agent]
+      summary: Stop the AI trading agent
+      responses:
+        "200":
+          description: Agent stopped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentStatus"
+
+  /agent/analyze:
+    post:
+      operationId: analyzeAndTrade
+      tags: [agent]
+      summary: Trigger one AI analysis cycle (analyze market and optionally trade)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnalyzeBody"
+      responses:
+        "200":
+          description: SSE stream of AI analysis and trade decision
+          content:
+            text/event-stream: {}
+
+  /agent/watchlist:
+    get:
+      operationId: getWatchlist
+      tags: [agent]
+      summary: Get instruments the agent is watching
+      responses:
+        "200":
+          description: Watchlist
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WatchlistItem"
+    post:
+      operationId: addToWatchlist
+      tags: [agent]
+      summary: Add instrument to watchlist
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddWatchlistBody"
+      responses:
+        "201":
+          description: Added to watchlist
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WatchlistItem"
+
+  /agent/watchlist/{id}:
+    delete:
+      operationId: removeFromWatchlist
+      tags: [agent]
+      summary: Remove instrument from watchlist
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Removed
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +423,385 @@ components:
       required:
         - status
 
+    ApiError:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+
+    Settings:
+      type: object
+      properties:
+        hasToken:
+          type: boolean
+        isSandbox:
+          type: boolean
+        accountId:
+          type: ["string", "null"]
+        maxOrderAmount:
+          type: number
+        riskPercent:
+          type: number
+        agentIntervalMinutes:
+          type: integer
+      required:
+        - hasToken
+        - isSandbox
+        - accountId
+        - maxOrderAmount
+        - riskPercent
+        - agentIntervalMinutes
+
+    UpdateSettingsBody:
+      type: object
+      properties:
+        token:
+          type: ["string", "null"]
+        isSandbox:
+          type: boolean
+        accountId:
+          type: ["string", "null"]
+        maxOrderAmount:
+          type: ["number", "null"]
+        riskPercent:
+          type: ["number", "null"]
+        agentIntervalMinutes:
+          type: ["integer", "null"]
+
+    Account:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        status:
+          type: string
+      required:
+        - id
+        - name
+        - type
+        - status
+
+    Portfolio:
+      type: object
+      properties:
+        positions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Position"
+        totalAmountRub:
+          type: number
+        expectedYield:
+          type: number
+      required:
+        - positions
+        - totalAmountRub
+        - expectedYield
+
+    Position:
+      type: object
+      properties:
+        figi:
+          type: string
+        ticker:
+          type: string
+        name:
+          type: string
+        quantity:
+          type: number
+        averagePrice:
+          type: number
+        currentPrice:
+          type: number
+        currentValue:
+          type: number
+        unrealizedPnl:
+          type: number
+        unrealizedPnlPercent:
+          type: number
+        instrumentType:
+          type: string
+      required:
+        - figi
+        - ticker
+        - name
+        - quantity
+        - averagePrice
+        - currentPrice
+        - currentValue
+        - unrealizedPnl
+        - unrealizedPnlPercent
+        - instrumentType
+
+    PortfolioSummary:
+      type: object
+      properties:
+        totalValue:
+          type: number
+        totalPnl:
+          type: number
+        totalPnlPercent:
+          type: number
+        dailyPnl:
+          type: number
+        dailyPnlPercent:
+          type: number
+        positionsCount:
+          type: integer
+        cashRub:
+          type: number
+      required:
+        - totalValue
+        - totalPnl
+        - totalPnlPercent
+        - dailyPnl
+        - dailyPnlPercent
+        - positionsCount
+        - cashRub
+
+    Instrument:
+      type: object
+      properties:
+        figi:
+          type: string
+        ticker:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        currency:
+          type: string
+        exchange:
+          type: string
+        lot:
+          type: integer
+      required:
+        - figi
+        - ticker
+        - name
+        - type
+        - currency
+        - lot
+
+    Candle:
+      type: object
+      properties:
+        time:
+          type: string
+          format: date-time
+        open:
+          type: number
+        high:
+          type: number
+        low:
+          type: number
+        close:
+          type: number
+        volume:
+          type: integer
+      required:
+        - time
+        - open
+        - high
+        - low
+        - close
+        - volume
+
+    LastPrice:
+      type: object
+      properties:
+        figi:
+          type: string
+        price:
+          type: number
+        time:
+          type: string
+          format: date-time
+      required:
+        - figi
+        - price
+        - time
+
+    Order:
+      type: object
+      properties:
+        orderId:
+          type: string
+        figi:
+          type: string
+        ticker:
+          type: string
+        direction:
+          type: string
+          enum: [buy, sell]
+        type:
+          type: string
+          enum: [market, limit]
+        quantity:
+          type: integer
+        price:
+          type: ["number", "null"]
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - orderId
+        - figi
+        - direction
+        - type
+        - quantity
+        - status
+        - createdAt
+
+    PlaceOrderBody:
+      type: object
+      properties:
+        figi:
+          type: string
+        direction:
+          type: string
+          enum: [buy, sell]
+        quantity:
+          type: integer
+        orderType:
+          type: string
+          enum: [market, limit]
+        price:
+          type: ["number", "null"]
+      required:
+        - figi
+        - direction
+        - quantity
+        - orderType
+
+    TradeLogEntry:
+      type: object
+      properties:
+        id:
+          type: integer
+        figi:
+          type: string
+        ticker:
+          type: string
+        action:
+          type: string
+          enum: [buy, sell, hold, analyze]
+        quantity:
+          type: ["integer", "null"]
+        price:
+          type: ["number", "null"]
+        aiReasoning:
+          type: string
+        success:
+          type: boolean
+        errorMessage:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - figi
+        - ticker
+        - action
+        - aiReasoning
+        - success
+        - createdAt
+
+    TradeStats:
+      type: object
+      properties:
+        totalTrades:
+          type: integer
+        successfulTrades:
+          type: integer
+        winRate:
+          type: number
+        totalPnl:
+          type: number
+        avgHoldingHours:
+          type: number
+      required:
+        - totalTrades
+        - successfulTrades
+        - winRate
+        - totalPnl
+        - avgHoldingHours
+
+    AgentStatus:
+      type: object
+      properties:
+        isRunning:
+          type: boolean
+        lastRunAt:
+          type: ["string", "null"]
+          format: date-time
+        nextRunAt:
+          type: ["string", "null"]
+          format: date-time
+        lastAction:
+          type: ["string", "null"]
+        totalAnalyses:
+          type: integer
+        totalTradesExecuted:
+          type: integer
+      required:
+        - isRunning
+        - lastRunAt
+        - nextRunAt
+        - lastAction
+        - totalAnalyses
+        - totalTradesExecuted
+
+    AnalyzeBody:
+      type: object
+      properties:
+        figi:
+          type: ["string", "null"]
+        executeIfConfident:
+          type: boolean
+      required:
+        - executeIfConfident
+
+    WatchlistItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        figi:
+          type: string
+        ticker:
+          type: string
+        name:
+          type: string
+        addedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - figi
+        - ticker
+        - name
+        - addedAt
+
+    AddWatchlistBody:
+      type: object
+      properties:
+        figi:
+          type: string
+        ticker:
+          type: string
+        name:
+          type: string
+      required:
+        - figi
+        - ticker
+        - name
