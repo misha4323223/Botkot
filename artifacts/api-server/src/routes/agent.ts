@@ -78,17 +78,48 @@ router.post("/agent/analyze", async (req, res): Promise<void> => {
       portfolioSummary = `Стоимость: ${totalValue.toFixed(0)} ₽, PnL: ${pnl >= 0 ? "+" : ""}${pnl.toFixed(0)} ₽, Позиций: ${portData.positions?.length ?? 0}`;
     } catch (_e) { /* ignore */ }
 
-    const watchlist = await db.select().from(watchlistTable).limit(10);
-    const targetFigi = figi ?? (watchlist.length > 0 ? watchlist[Math.floor(Math.random() * watchlist.length)].figi : null);
-    const targetItem = watchlist.find((w) => w.figi === targetFigi);
-    const targetTicker = targetItem?.ticker ?? targetFigi ?? "UNKNOWN";
+    const watchlist = await db.select().from(watchlistTable).orderBy(watchlistTable.id);
+    const targetsList: { figi: string; ticker: string }[] = figi
+      ? [{ figi, ticker: watchlist.find(w => w.figi === figi)?.ticker ?? figi }]
+      : watchlist.map(w => ({ figi: w.figi, ticker: w.ticker }));
 
-    if (!targetFigi) {
+    if (targetsList.length === 0) {
       sendEvent({ type: "error", message: "Список наблюдения пуст. Добавьте акции." });
       sendEvent({ done: true });
       res.end();
       return;
     }
+
+    sendEvent({ type: "thinking", message: `Будет проанализировано тикеров: ${targetsList.length} (по порядку)` });
+
+    for (let i = 0; i < targetsList.length; i++) {
+      const cur = targetsList[i];
+      sendEvent({ type: "thinking", message: `\n\n══════ [${i + 1}/${targetsList.length}] ${cur.ticker} ══════` });
+      await analyzeOne(cur.figi, cur.ticker, sendEvent, s, executeIfConfident, portfolioSummary);
+    }
+
+    sendEvent({ done: true });
+    res.end();
+    return;
+  } catch (err) {
+    logger.error({ err }, "Agent analyze error");
+    try {
+      res.write(`data: ${JSON.stringify({ type: "error", message: err instanceof Error ? err.message : "Неизвестная ошибка" })}\n\n`);
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      res.end();
+    } catch (_e) { /* ignore */ }
+  }
+});
+
+async function analyzeOne(
+  targetFigi: string,
+  targetTicker: string,
+  sendEvent: (data: Record<string, unknown>) => void,
+  s: Awaited<ReturnType<typeof getOrCreateSettings>>,
+  executeIfConfident: boolean,
+  portfolioSummary: string,
+): Promise<void> {
+  try {
 
     sendEvent({ type: "thinking", message: `Получаю котировки для ${targetTicker}...` });
 
@@ -187,10 +218,13 @@ ${logContext}
     if (executeIfConfident && (action === "buy" || action === "sell") && confidence >= 80) {
       const market = isMoexOpen();
       if (!market.open) {
-        sendEvent({ type: "thinking", message: `⏰ ${market.reason}. Анализ сохранён, сделка отложена до открытия биржи (10:00 МСК).` });
-        await db.insert(tradeLogsTable).values({ figi: targetFigi, ticker: targetTicker, action: "hold", aiReasoning: `${fullResponse}\n\n⏰ Сделка не исполнена: ${market.reason}`, success: true });
-        sendEvent({ done: true });
-        res.end();
+        sendEvent({ type: "thinking", message: `⏰ ${market.reason}. Анализ сохранён, сделка отложена до открытия биржи.` });
+        await db.insert(tradeLogsTable).values({ figi: targetFigi, ticker: targetTicker, action: "hold", aiReasoning: `${fullResponse}\n\n⏰ Сделка не исполнена: ${market.reason}`, success: true, mode: s.paperMode ? "paper" : "live", confidence });
+        return;
+      }
+      if (s.paperMode) {
+        sendEvent({ type: "thinking", message: `[PAPER] Записываю симуляцию: ${action.toUpperCase()} ${targetTicker} по ₽${currentPrice.toFixed(2)}` });
+        await db.insert(tradeLogsTable).values({ figi: targetFigi, ticker: targetTicker, action, quantity: 1, price: currentPrice || null, aiReasoning: `[PAPER] ${fullResponse}`, success: true, mode: "paper", confidence });
         return;
       }
       sendEvent({ type: "thinking", message: `Уверенность ${confidence}% ≥ 80% — исполняю: ${action === "buy" ? "КУПИТЬ" : "ПРОДАТЬ"} ${targetTicker}...` });
@@ -211,31 +245,24 @@ ${logContext}
           s.isSandbox
         );
         agentState.totalTradesExecuted++;
-        await db.insert(tradeLogsTable).values({ figi: targetFigi, ticker: targetTicker, action, quantity: 1, price: currentPrice || null, aiReasoning: fullResponse, success: true });
+        await db.insert(tradeLogsTable).values({ figi: targetFigi, ticker: targetTicker, action, quantity: 1, price: currentPrice || null, aiReasoning: fullResponse, success: true, mode: "live", confidence });
         sendEvent({ type: "trade_executed", action, ticker: targetTicker, message: `✅ Сделка исполнена: ${action === "buy" ? "КУПЛЕН" : "ПРОДАН"} 1 лот ${targetTicker} по ₽${currentPrice.toFixed(2)}` });
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : "Ошибка исполнения";
-        await db.insert(tradeLogsTable).values({ figi: targetFigi, ticker: targetTicker, action, aiReasoning: fullResponse, success: false, errorMessage: errMsg });
+        await db.insert(tradeLogsTable).values({ figi: targetFigi, ticker: targetTicker, action, aiReasoning: fullResponse, success: false, errorMessage: errMsg, mode: "live", confidence });
         sendEvent({ type: "error", message: `Ошибка исполнения: ${errMsg}` });
       }
     } else {
       if (executeIfConfident && (action === "buy" || action === "sell") && confidence < 80) {
         sendEvent({ type: "thinking", message: `Уверенность ${confidence}% < 80% — сделка не исполняется (недостаточно уверен).` });
       }
-      await db.insert(tradeLogsTable).values({ figi: targetFigi, ticker: targetTicker, action: action === "hold" ? "hold" : "analyze", aiReasoning: fullResponse, success: true });
+      await db.insert(tradeLogsTable).values({ figi: targetFigi, ticker: targetTicker, action: action === "hold" ? "hold" : "analyze", aiReasoning: fullResponse, success: true, mode: s.paperMode ? "paper" : "live", confidence });
     }
-
-    sendEvent({ done: true });
-    res.end();
   } catch (err) {
-    logger.error({ err }, "Agent analyze error");
-    try {
-      res.write(`data: ${JSON.stringify({ type: "error", message: err instanceof Error ? err.message : "Неизвестная ошибка" })}\n\n`);
-      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-      res.end();
-    } catch (_e) { /* ignore */ }
+    logger.error({ err, ticker: targetTicker }, "analyzeOne error");
+    sendEvent({ type: "error", message: `Ошибка ${targetTicker}: ${err instanceof Error ? err.message : "неизвестная"}` });
   }
-});
+}
 
 router.get("/agent/stats", async (_req, res): Promise<void> => {
   const s = await getOrCreateSettings();
