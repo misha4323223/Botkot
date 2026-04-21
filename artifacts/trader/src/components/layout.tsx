@@ -23,9 +23,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
 
   return (
-    <div className="flex h-screen w-full bg-background text-foreground overflow-hidden">
-      {/* Sidebar */}
-      <div className="w-64 border-r border-border bg-card flex flex-col">
+    <div className="flex h-[100dvh] w-full bg-background text-foreground overflow-hidden">
+      {/* Sidebar — desktop only */}
+      <div className="hidden lg:flex w-64 border-r border-border bg-card flex-col shrink-0">
         <div className="h-16 flex items-center px-6 border-b border-border">
           <Activity className="w-6 h-6 text-primary mr-2" />
           <span className="font-bold text-lg tracking-tight text-card-foreground">AI Trader</span>
@@ -62,22 +62,56 @@ export function Layout({ children }: { children: React.ReactNode }) {
         
         <div className="p-4 border-t border-border">
           <div className="flex items-center">
-            <div className="w-8 h-8 rounded bg-primary/20 flex items-center justify-center text-primary font-bold">
+            <div className="w-8 h-8 rounded bg-primary/20 flex items-center justify-center text-primary font-bold text-xs">
               AI
             </div>
             <div className="ml-3">
               <p className="text-sm font-medium text-card-foreground">Tinkoff Live</p>
-              <p className="text-xs text-success">Connected</p>
+              <p className="text-xs text-green-500">Connected</p>
             </div>
           </div>
         </div>
       </div>
 
       {/* Main content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <main className="flex-1 overflow-y-auto p-8">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* Mobile top bar */}
+        <div className="lg:hidden flex items-center h-14 px-4 border-b border-border bg-card shrink-0">
+          <Activity className="w-5 h-5 text-primary mr-2" />
+          <span className="font-bold text-base tracking-tight text-card-foreground">AI Trader</span>
+        </div>
+
+        {/* Page content */}
+        <main className="flex-1 overflow-y-auto p-4 lg:p-8 pb-20 lg:pb-8">
           {children}
         </main>
+
+        {/* Bottom nav — mobile only */}
+        <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card">
+          <nav className="flex">
+            {navigation.map((item) => {
+              const isActive = location === item.href;
+              return (
+                <Link
+                  key={item.name}
+                  href={item.href}
+                  className={cn(
+                    "flex-1 flex flex-col items-center justify-center py-2 gap-0.5 text-[10px] font-medium transition-colors min-h-[56px]",
+                    isActive
+                      ? "text-primary"
+                      : "text-muted-foreground"
+                  )}
+                >
+                  <item.icon
+                    className={cn("h-5 w-5 shrink-0", isActive ? "text-primary" : "text-muted-foreground")}
+                    aria-hidden="true"
+                  />
+                  {item.name}
+                </Link>
+              );
+            })}
+          </nav>
+        </div>
       </div>
     </div>
   );
