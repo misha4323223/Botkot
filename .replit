@@ -38,3 +38,4 @@ channel = "stable-25_05"
 
 [userenv.shared]
 APP_ENCRYPTION_KEY = "Zi1CFeXA4/+i2dkLRyszW/NURpLOtKBsZDtzveUSj7Y="
+APP_PASSWORD = "storm-echo-shadow-4173"

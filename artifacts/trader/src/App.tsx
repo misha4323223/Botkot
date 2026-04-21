@@ -11,6 +11,8 @@ import MarketPage from "@/pages/market";
 import AgentPage from "@/pages/agent";
 import OrdersPage from "@/pages/orders";
 import SettingsPage from "@/pages/settings";
+import LoginPage from "@/pages/login";
+import { AuthProvider, useAuth } from "@/hooks/use-auth";
 
 const queryClient = new QueryClient();
 
@@ -30,12 +32,25 @@ function Router() {
   );
 }
 
+function Gate() {
+  const { loading, authRequired, authenticated } = useAuth();
+  if (loading) {
+    return <div className="min-h-screen flex items-center justify-center text-muted-foreground">Загрузка...</div>;
+  }
+  if (authRequired && !authenticated) {
+    return <LoginPage />;
+  }
+  return <Router />;
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <WouterRouter base={import.meta.env.BASE_URL?.replace(/\/$/, "") || ""}>
-          <Router />
+          <AuthProvider>
+            <Gate />
+          </AuthProvider>
         </WouterRouter>
         <Toaster />
       </TooltipProvider>
