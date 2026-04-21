@@ -1,14 +1,18 @@
 import { Router, type IRouter } from "express";
 import { db, settingsTable } from "@workspace/db";
 import { UpdateSettingsBody } from "@workspace/api-zod";
+import { encryptString, decryptString } from "../lib/crypto";
 
 const router: IRouter = Router();
 
 async function getOrCreateSettings() {
   const rows = await db.select().from(settingsTable).limit(1);
-  if (rows.length > 0) return rows[0];
-  const [created] = await db.insert(settingsTable).values({}).returning();
-  return created;
+  let row = rows[0];
+  if (!row) {
+    [row] = await db.insert(settingsTable).values({}).returning();
+  }
+  // Return decrypted token to callers
+  return { ...row, token: decryptString(row.token) };
 }
 
 router.get("/settings", async (_req, res): Promise<void> => {
@@ -31,9 +35,9 @@ router.put("/settings", async (req, res): Promise<void> => {
   }
 
   const s = await getOrCreateSettings();
-  const update: Partial<typeof s> = {};
+  const update: Partial<typeof settingsTable.$inferInsert> = {};
 
-  if (parsed.data.token != null) update.token = parsed.data.token;
+  if (parsed.data.token != null) update.token = encryptString(parsed.data.token);
   if (parsed.data.isSandbox != null) update.isSandbox = parsed.data.isSandbox;
   if (parsed.data.accountId != null) update.accountId = parsed.data.accountId;
   if (parsed.data.maxOrderAmount != null) update.maxOrderAmount = parsed.data.maxOrderAmount;
@@ -41,7 +45,7 @@ router.put("/settings", async (req, res): Promise<void> => {
   if (parsed.data.agentIntervalMinutes != null) update.agentIntervalMinutes = parsed.data.agentIntervalMinutes;
 
   const [updated] = await db.update(settingsTable).set(update).returning();
-  const final = updated ?? s;
+  const final = updated ?? { ...s, token: s.token ? encryptString(s.token) : null };
 
   res.json({
     hasToken: !!final.token,

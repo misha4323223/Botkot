@@ -4,6 +4,7 @@ import { openai } from "@workspace/integrations-openai-ai-server";
 import { agentState } from "./agent-state";
 import { tinkoffPost, parseQuotation } from "./tinkoff";
 import { logger } from "./logger";
+import { withRetry } from "./openai-retry";
 import { randomUUID } from "crypto";
 
 /**
@@ -34,10 +35,13 @@ export function isMoexOpen(): { open: boolean; reason: string } {
 
 export async function getOrCreateSettingsForLoop() {
   const { settingsTable } = await import("@workspace/db");
+  const { decryptString } = await import("./crypto");
   const rows = await db.select().from(settingsTable).limit(1);
-  if (rows.length > 0) return rows[0];
-  const [row] = await db.insert(settingsTable).values({}).returning();
-  return row;
+  let row = rows[0];
+  if (!row) {
+    [row] = await db.insert(settingsTable).values({}).returning();
+  }
+  return { ...row, token: decryptString(row.token) };
 }
 
 export async function getCandleSummary(figi: string, token: string, isSandbox: boolean): Promise<string> {
@@ -123,9 +127,9 @@ export async function runAgentCycle(specificFigi: string | null) {
   const recentLogs = await db.select().from(tradeLogsTable).orderBy(desc(tradeLogsTable.createdAt)).limit(3);
   const logCtx = recentLogs.map(l => `${l.action.toUpperCase()} ${l.ticker}: ${l.aiReasoning.slice(0, 80)}`).join("\n") || "Нет истории";
 
-  const response = await openai.chat.completions.create({
-    model: "gpt-4.1",
-    max_completion_tokens: 512,
+  const response = await withRetry(() => openai.chat.completions.create({
+    model: "gpt-5.4",
+    max_completion_tokens: 8192,
     messages: [
       {
         role: "system",
@@ -136,7 +140,7 @@ export async function runAgentCycle(specificFigi: string | null) {
         content: `Акция: ${target.ticker}\nЦена: ${currentPrice > 0 ? `${currentPrice.toFixed(2)} ₽` : "н/д"}\n\n${candleSummary}\n\nИстория решений:\n${logCtx}\n\nПрими решение: КУПИТЬ/ПРОДАТЬ/ДЕРЖАТЬ.\nФормат: РЕШЕНИЕ: X | УВЕРЕННОСТЬ: N% | ОБОСНОВАНИЕ: (1 предложение)`,
       },
     ],
-  });
+  }));
 
   const text = response.choices[0]?.message?.content ?? "ДЕРЖАТЬ";
   const decision = /КУПИТЬ/i.test(text) ? "buy" : /ПРОДАТЬ/i.test(text) ? "sell" : "hold";

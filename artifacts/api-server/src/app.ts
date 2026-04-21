@@ -1,9 +1,11 @@
 import express, { type Express } from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { db, settingsTable } from "@workspace/db";
+import { encryptString } from "./lib/crypto";
 
 const app: Express = express();
 
@@ -26,7 +28,8 @@ app.use(
     },
   }),
 );
-app.use(cors());
+app.use(cors({ origin: true, credentials: true }));
+app.use(cookieParser());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -40,11 +43,11 @@ async function initOnStartup() {
   try {
     const rows = await db.select().from(settingsTable).limit(1);
     if (rows.length === 0) {
-      await db.insert(settingsTable).values({ token: envToken ?? null });
+      await db.insert(settingsTable).values({ token: envToken ? encryptString(envToken) : null });
       logger.info("Created default settings row");
     } else if (envToken && !rows[0].token) {
-      await db.update(settingsTable).set({ token: envToken });
-      logger.info("Saved TINKOFF_API_TOKEN from env to settings");
+      await db.update(settingsTable).set({ token: encryptString(envToken) });
+      logger.info("Saved TINKOFF_API_TOKEN from env to settings (encrypted)");
     }
   } catch (err) {
     logger.error({ err }, "Failed to init settings");

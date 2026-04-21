@@ -7,7 +7,6 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useEffect } from "react";
@@ -46,7 +45,7 @@ export default function SettingsPage() {
     resolver: zodResolver(settingsSchema),
     defaultValues: {
       token: "",
-      isSandbox: true,
+      isSandbox: false,
       accountId: null,
       maxOrderAmount: 10000,
       riskPercent: 2,
@@ -58,7 +57,7 @@ export default function SettingsPage() {
     if (settings) {
       form.reset({
         token: "", // Never display the real token
-        isSandbox: settings.isSandbox,
+        isSandbox: false,
         accountId: settings.accountId,
         maxOrderAmount: settings.maxOrderAmount,
         riskPercent: settings.riskPercent,
@@ -114,48 +113,31 @@ export default function SettingsPage() {
                 )}
               />
 
-              <div className="flex gap-6">
-                <FormField
-                  control={form.control}
-                  name="isSandbox"
-                  render={({ field }) => (
-                    <FormItem className="flex flex-row items-center justify-between rounded-lg border border-border p-4 w-1/2 bg-background">
-                      <div className="space-y-0.5">
-                        <FormLabel className="text-base">Sandbox Mode</FormLabel>
-                        <FormDescription>Use paper money</FormDescription>
-                      </div>
+              <FormField
+                control={form.control}
+                name="accountId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Торговый счёт</FormLabel>
+                    <Select value={field.value || undefined} onValueChange={field.onChange}>
                       <FormControl>
-                        <Switch checked={field.value} onCheckedChange={field.onChange} />
+                        <SelectTrigger className="bg-background">
+                          <SelectValue placeholder="Выберите счёт" />
+                        </SelectTrigger>
                       </FormControl>
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="accountId"
-                  render={({ field }) => (
-                    <FormItem className="w-1/2">
-                      <FormLabel>Trading Account</FormLabel>
-                      <Select value={field.value || undefined} onValueChange={field.onChange}>
-                        <FormControl>
-                          <SelectTrigger className="bg-background">
-                            <SelectValue placeholder="Select account" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {accounts?.map((acc) => (
-                            <SelectItem key={acc.id} value={acc.id}>
-                              {acc.name} ({acc.id.slice(-4)})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
+                      <SelectContent>
+                        {accounts?.map((acc) => (
+                          <SelectItem key={acc.id} value={acc.id}>
+                            {acc.name} ({acc.id.slice(-4)})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>Все ордера будут отправляться на этот счёт</FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
             </CardContent>
           </Card>
 

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { format } from "date-fns";
 import { Target, XCircle, CheckCircle2, AlertCircle } from "lucide-react";
+import { QuickTrade } from "@/components/quick-trade";
 
 export default function OrdersPage() {
   const queryClient = useQueryClient();
@@ -25,8 +26,10 @@ export default function OrdersPage() {
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold tracking-tight">Orders & History</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Ордера и история</h1>
       </div>
+
+      <QuickTrade />
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <Card className="bg-card border-card-border">
