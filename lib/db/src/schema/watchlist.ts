@@ -1,8 +1,9 @@
-import { pgTable, text, serial, timestamp } from "drizzle-orm/pg-core";
+import { text, serial, timestamp } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
+import { traderSchema } from "./_schema";
 
-export const watchlistTable = pgTable("watchlist", {
+export const watchlistTable = traderSchema.table("watchlist", {
   id: serial("id").primaryKey(),
   figi: text("figi").notNull(),
   ticker: text("ticker").notNull(),

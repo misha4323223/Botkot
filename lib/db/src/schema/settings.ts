@@ -1,8 +1,9 @@
-import { pgTable, text, boolean, real, integer, serial } from "drizzle-orm/pg-core";
+import { text, boolean, real, integer, serial } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
+import { traderSchema } from "./_schema";
 
-export const settingsTable = pgTable("settings", {
+export const settingsTable = traderSchema.table("settings", {
   id: serial("id").primaryKey(),
   token: text("token"),
   isSandbox: boolean("is_sandbox").notNull().default(false),

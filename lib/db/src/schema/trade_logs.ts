@@ -1,12 +1,13 @@
-import { pgTable, text, serial, timestamp, boolean, real, integer } from "drizzle-orm/pg-core";
+import { text, serial, timestamp, boolean, real, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
+import { traderSchema } from "./_schema";
 
-export const tradeLogsTable = pgTable("trade_logs", {
+export const tradeLogsTable = traderSchema.table("trade_logs", {
   id: serial("id").primaryKey(),
   figi: text("figi").notNull(),
   ticker: text("ticker").notNull(),
-  action: text("action").notNull(), // buy | sell | hold | analyze
+  action: text("action").notNull(),
   quantity: integer("quantity"),
   price: real("price"),
   aiReasoning: text("ai_reasoning").notNull(),
