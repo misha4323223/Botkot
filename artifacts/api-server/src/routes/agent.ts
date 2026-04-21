@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db, watchlistTable, tradeLogsTable } from "@workspace/db";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and, isNull, isNotNull, gte } from "drizzle-orm";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { AnalyzeAndTradeBody, AddToWatchlistBody } from "@workspace/api-zod";
 import { agentState, getAgentStatusResponse } from "../lib/agent-state";
@@ -235,6 +235,118 @@ ${logContext}
       res.end();
     } catch (_e) { /* ignore */ }
   }
+});
+
+router.get("/agent/stats", async (_req, res): Promise<void> => {
+  const s = await getOrCreateSettings();
+  const mode: "paper" | "live" = s.paperMode ? "paper" : "live";
+  const all = await db.select().from(tradeLogsTable).where(eq(tradeLogsTable.mode, mode));
+  const decisions = all.filter(r => r.action === "buy" || r.action === "sell" || r.action === "hold");
+  const trades = all.filter(r => (r.action === "buy" || r.action === "sell") && r.success);
+  const closed = trades.filter(r => r.closedAt != null);
+  const open = trades.filter(r => r.closedAt == null);
+  const wins = closed.filter(r => (r.realizedPnl ?? 0) > 0).length;
+  const winRate = closed.length > 0 ? (wins / closed.length) * 100 : 0;
+  const realizedPnl = closed.reduce((a, r) => a + (r.realizedPnl ?? 0), 0);
+
+  // Unrealized for open paper positions: need current prices
+  let unrealizedPnl = 0;
+  if (open.length > 0 && s.token) {
+    const figis = Array.from(new Set(open.map(o => o.figi)));
+    try {
+      const data = await tinkoffPost<{ lastPrices?: { figi?: string; price?: { units?: string; nano?: number } }[] }>(
+        "/tinkoff.public.invest.api.contract.v1.MarketDataService/GetLastPrices",
+        { figi: figis }, s.token, s.isSandbox,
+      );
+      const prices = new Map<string, number>();
+      for (const p of data.lastPrices ?? []) if (p.figi) prices.set(p.figi, parseQuotation(p.price));
+      for (const o of open) {
+        const cur = prices.get(o.figi) ?? 0;
+        if (cur <= 0) continue;
+        const entry = o.price ?? 0;
+        const qty = o.quantity ?? 0;
+        unrealizedPnl += o.action === "buy" ? (cur - entry) * qty : (entry - cur) * qty;
+      }
+    } catch { /* ignore */ }
+  }
+
+  const avgConf = decisions.length > 0 ? decisions.reduce((a, r) => a + (r.confidence ?? 0), 0) / decisions.length : 0;
+
+  // Calibration buckets by confidence on CLOSED trades
+  const buckets: Array<{ bucket: string; min: number; max: number; decisions: number; wins: number; winRate: number }> = [
+    { bucket: "0-49%", min: 0, max: 50, decisions: 0, wins: 0, winRate: 0 },
+    { bucket: "50-69%", min: 50, max: 70, decisions: 0, wins: 0, winRate: 0 },
+    { bucket: "70-79%", min: 70, max: 80, decisions: 0, wins: 0, winRate: 0 },
+    { bucket: "80-89%", min: 80, max: 90, decisions: 0, wins: 0, winRate: 0 },
+    { bucket: "90-100%", min: 90, max: 101, decisions: 0, wins: 0, winRate: 0 },
+  ];
+  for (const t of closed) {
+    const c = t.confidence ?? 0;
+    const b = buckets.find(x => c >= x.min && c < x.max);
+    if (b) {
+      b.decisions++;
+      if ((t.realizedPnl ?? 0) > 0) b.wins++;
+    }
+  }
+  for (const b of buckets) b.winRate = b.decisions > 0 ? (b.wins / b.decisions) * 100 : 0;
+
+  // Buy-and-hold compare: take first trade per ticker price vs current
+  let agentReturnPct = 0;
+  let buyHoldReturnPct = 0;
+  if (closed.length > 0) {
+    const totalEntry = closed.reduce((a, r) => a + ((r.price ?? 0) * (r.quantity ?? 0)), 0);
+    agentReturnPct = totalEntry > 0 ? (realizedPnl / totalEntry) * 100 : 0;
+  }
+  if (s.token) {
+    try {
+      // Per-ticker first buy: compare to current price
+      const firstBuyByTicker = new Map<string, { entry: number; figi: string }>();
+      for (const t of [...trades].reverse()) {
+        if (t.action !== "buy") continue;
+        if (!firstBuyByTicker.has(t.ticker)) firstBuyByTicker.set(t.ticker, { entry: t.price ?? 0, figi: t.figi });
+      }
+      if (firstBuyByTicker.size > 0) {
+        const figis = Array.from(firstBuyByTicker.values()).map(v => v.figi);
+        const data = await tinkoffPost<{ lastPrices?: { figi?: string; price?: { units?: string; nano?: number } }[] }>(
+          "/tinkoff.public.invest.api.contract.v1.MarketDataService/GetLastPrices",
+          { figi: figis }, s.token, s.isSandbox,
+        );
+        const cur = new Map<string, number>();
+        for (const p of data.lastPrices ?? []) if (p.figi) cur.set(p.figi, parseQuotation(p.price));
+        let sumPct = 0; let n = 0;
+        for (const [, v] of firstBuyByTicker) {
+          const c = cur.get(v.figi) ?? 0;
+          if (v.entry > 0 && c > 0) { sumPct += ((c - v.entry) / v.entry) * 100; n++; }
+        }
+        buyHoldReturnPct = n > 0 ? sumPct / n : 0;
+      }
+    } catch { /* ignore */ }
+  }
+
+  // Daily usage
+  const dayStart = new Date(); dayStart.setUTCHours(0, 0, 0, 0);
+  const today = await db.select().from(tradeLogsTable).where(and(eq(tradeLogsTable.mode, mode), gte(tradeLogsTable.createdAt, dayStart)));
+  const dailyTradesUsed = today.filter(r => r.action === "buy" || r.action === "sell").length;
+  const dailyLossUsedRub = Math.max(0, -today.reduce((a, r) => a + (r.realizedPnl ?? 0), 0));
+
+  // Suppress unused warnings
+  void isNull; void isNotNull;
+
+  res.json({
+    mode,
+    totalDecisions: decisions.length,
+    totalTrades: trades.length,
+    openPositions: open.length,
+    closedPositions: closed.length,
+    winRate,
+    realizedPnl,
+    unrealizedPnl,
+    avgConfidence: avgConf,
+    calibration: buckets.map(b => ({ bucket: b.bucket, decisions: b.decisions, wins: b.wins, winRate: b.winRate })),
+    vsBuyAndHold: { agentReturnPct, buyHoldReturnPct },
+    dailyLossUsedRub,
+    dailyTradesUsed,
+  });
 });
 
 router.get("/agent/watchlist", async (_req, res): Promise<void> => {

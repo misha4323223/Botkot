@@ -7,6 +7,7 @@ import {
   useRemoveFromWatchlist,
   useAddToWatchlist,
   useSearchInstruments,
+  useGetAgentStats,
   getGetAgentStatusQueryKey,
   getGetWatchlistQueryKey
 } from "@workspace/api-client-react";
@@ -20,6 +21,16 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Bot, Play, Square, Trash2, TerminalSquare, Search, Plus, Check, ShieldAlert } from "lucide-react";
 
+function Stat({ label, value, tone }: { label: string; value: string | number; tone?: "good" | "bad" | "neutral" }) {
+  const color = tone === "good" ? "text-green-500" : tone === "bad" ? "text-red-500" : "text-foreground";
+  return (
+    <div className="rounded-lg border border-border/50 bg-muted/10 p-3">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className={`text-lg font-bold font-mono ${color}`}>{value}</div>
+    </div>
+  );
+}
+
 export default function AgentPage() {
   const queryClient = useQueryClient();
   const [streamData, setStreamData] = useState<string>("");
@@ -32,6 +43,7 @@ export default function AgentPage() {
   
   const { data: status, isLoading: isStatusLoading } = useGetAgentStatus();
   const { data: watchlist, isLoading: isWatchlistLoading } = useGetWatchlist();
+  const { data: stats } = useGetAgentStats({ query: { refetchInterval: 30000 } });
 
   const startAgent = useStartAgent({
     mutation: { onSuccess: () => queryClient.invalidateQueries({ queryKey: getGetAgentStatusQueryKey() }) }
@@ -119,6 +131,45 @@ export default function AgentPage() {
           )}
         </div>
       </div>
+
+      {/* Stats dashboard */}
+      {stats && (
+        <Card className="bg-card border-border">
+          <CardHeader className="pb-3 pt-4 px-4 flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="text-base">Статистика агента</CardTitle>
+              <CardDescription className="text-xs">
+                Режим: <span className={stats.mode === "paper" ? "text-blue-400 font-bold" : "text-yellow-400 font-bold"}>{stats.mode === "paper" ? "PAPER (симуляция)" : "LIVE (боевой)"}</span>
+                {" · "}Готовность к live: P&L &gt; 0, win-rate &gt; 55%, обыгрывает buy-and-hold за 2 недели
+              </CardDescription>
+            </div>
+          </CardHeader>
+          <CardContent className="px-4 pb-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+              <Stat label="Решений" value={stats.totalDecisions} />
+              <Stat label="Сделок (откр./закр.)" value={`${stats.openPositions} / ${stats.closedPositions}`} />
+              <Stat label="Win-rate" value={`${stats.winRate.toFixed(1)}%`} tone={stats.winRate >= 55 ? "good" : stats.closedPositions === 0 ? "neutral" : "bad"} />
+              <Stat label="Realized P&L" value={`${stats.realizedPnl >= 0 ? "+" : ""}${stats.realizedPnl.toFixed(2)}₽`} tone={stats.realizedPnl >= 0 ? "good" : "bad"} />
+              <Stat label="Unrealized P&L" value={`${stats.unrealizedPnl >= 0 ? "+" : ""}${stats.unrealizedPnl.toFixed(2)}₽`} tone={stats.unrealizedPnl >= 0 ? "good" : "bad"} />
+              <Stat label="Avg confidence" value={`${stats.avgConfidence.toFixed(0)}%`} />
+              <Stat label="Vs buy-and-hold" value={`${stats.vsBuyAndHold.agentReturnPct.toFixed(1)}% / ${stats.vsBuyAndHold.buyHoldReturnPct.toFixed(1)}%`} tone={stats.vsBuyAndHold.agentReturnPct >= stats.vsBuyAndHold.buyHoldReturnPct ? "good" : "bad"} />
+              <Stat label="Сегодня: сделок / убыток" value={`${stats.dailyTradesUsed} / ${stats.dailyLossUsedRub.toFixed(0)}₽`} />
+            </div>
+            <div>
+              <p className="text-xs font-medium text-muted-foreground mb-2">Калибровка уверенности (по закрытым сделкам):</p>
+              <div className="grid grid-cols-5 gap-1">
+                {stats.calibration.map(b => (
+                  <div key={b.bucket} className="text-center p-2 rounded border border-border/50 bg-muted/10">
+                    <div className="text-[10px] text-muted-foreground">{b.bucket}</div>
+                    <div className="text-sm font-bold font-mono">{b.decisions > 0 ? `${b.winRate.toFixed(0)}%` : "—"}</div>
+                    <div className="text-[10px] text-muted-foreground">{b.decisions} сд.</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         

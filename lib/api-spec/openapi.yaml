@@ -366,6 +366,19 @@ paths:
           content:
             text/event-stream: {}
 
+  /agent/stats:
+    get:
+      operationId: getAgentStats
+      tags: [agent]
+      summary: Paper/live trading stats, calibration, vs buy-and-hold
+      responses:
+        "200":
+          description: Stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentStats"
+
   /agent/watchlist:
     get:
       operationId: getWatchlist
@@ -446,6 +459,20 @@ components:
           type: number
         agentIntervalMinutes:
           type: integer
+        paperMode:
+          type: boolean
+        confidenceThreshold:
+          type: integer
+        stopLossPercent:
+          type: number
+        takeProfitPercent:
+          type: number
+        dailyLossLimitRub:
+          type: number
+        maxTradesPerDay:
+          type: integer
+        priceLimitPercent:
+          type: number
       required:
         - hasToken
         - isSandbox
@@ -453,6 +480,13 @@ components:
         - maxOrderAmount
         - riskPercent
         - agentIntervalMinutes
+        - paperMode
+        - confidenceThreshold
+        - stopLossPercent
+        - takeProfitPercent
+        - dailyLossLimitRub
+        - maxTradesPerDay
+        - priceLimitPercent
 
     UpdateSettingsBody:
       type: object
@@ -469,6 +503,83 @@ components:
           type: ["number", "null"]
         agentIntervalMinutes:
           type: ["integer", "null"]
+        paperMode:
+          type: ["boolean", "null"]
+        confidenceThreshold:
+          type: ["integer", "null"]
+        stopLossPercent:
+          type: ["number", "null"]
+        takeProfitPercent:
+          type: ["number", "null"]
+        dailyLossLimitRub:
+          type: ["number", "null"]
+        maxTradesPerDay:
+          type: ["integer", "null"]
+        priceLimitPercent:
+          type: ["number", "null"]
+
+    AgentStats:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum: [paper, live]
+        totalDecisions:
+          type: integer
+        totalTrades:
+          type: integer
+        openPositions:
+          type: integer
+        closedPositions:
+          type: integer
+        winRate:
+          type: number
+        realizedPnl:
+          type: number
+        unrealizedPnl:
+          type: number
+        avgConfidence:
+          type: number
+        calibration:
+          type: array
+          items:
+            type: object
+            properties:
+              bucket:
+                type: string
+              decisions:
+                type: integer
+              wins:
+                type: integer
+              winRate:
+                type: number
+            required: [bucket, decisions, wins, winRate]
+        vsBuyAndHold:
+          type: object
+          properties:
+            agentReturnPct:
+              type: number
+            buyHoldReturnPct:
+              type: number
+          required: [agentReturnPct, buyHoldReturnPct]
+        dailyLossUsedRub:
+          type: number
+        dailyTradesUsed:
+          type: integer
+      required:
+        - mode
+        - totalDecisions
+        - totalTrades
+        - openPositions
+        - closedPositions
+        - winRate
+        - realizedPnl
+        - unrealizedPnl
+        - avgConfidence
+        - calibration
+        - vsBuyAndHold
+        - dailyLossUsedRub
+        - dailyTradesUsed
 
     Account:
       type: object

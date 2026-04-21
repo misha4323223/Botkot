@@ -21,6 +21,13 @@ export interface Settings {
   maxOrderAmount: number;
   riskPercent: number;
   agentIntervalMinutes: number;
+  paperMode: boolean;
+  confidenceThreshold: number;
+  stopLossPercent: number;
+  takeProfitPercent: number;
+  dailyLossLimitRub: number;
+  maxTradesPerDay: number;
+  priceLimitPercent: number;
 }
 
 export interface UpdateSettingsBody {
@@ -35,6 +42,56 @@ export interface UpdateSettingsBody {
   riskPercent?: number | null;
   /** @nullable */
   agentIntervalMinutes?: number | null;
+  /** @nullable */
+  paperMode?: boolean | null;
+  /** @nullable */
+  confidenceThreshold?: number | null;
+  /** @nullable */
+  stopLossPercent?: number | null;
+  /** @nullable */
+  takeProfitPercent?: number | null;
+  /** @nullable */
+  dailyLossLimitRub?: number | null;
+  /** @nullable */
+  maxTradesPerDay?: number | null;
+  /** @nullable */
+  priceLimitPercent?: number | null;
+}
+
+export type AgentStatsMode =
+  (typeof AgentStatsMode)[keyof typeof AgentStatsMode];
+
+export const AgentStatsMode = {
+  paper: "paper",
+  live: "live",
+} as const;
+
+export type AgentStatsCalibrationItem = {
+  bucket: string;
+  decisions: number;
+  wins: number;
+  winRate: number;
+};
+
+export type AgentStatsVsBuyAndHold = {
+  agentReturnPct: number;
+  buyHoldReturnPct: number;
+};
+
+export interface AgentStats {
+  mode: AgentStatsMode;
+  totalDecisions: number;
+  totalTrades: number;
+  openPositions: number;
+  closedPositions: number;
+  winRate: number;
+  realizedPnl: number;
+  unrealizedPnl: number;
+  avgConfidence: number;
+  calibration: AgentStatsCalibrationItem[];
+  vsBuyAndHold: AgentStatsVsBuyAndHold;
+  dailyLossUsedRub: number;
+  dailyTradesUsed: number;
 }
 
 export interface Account {

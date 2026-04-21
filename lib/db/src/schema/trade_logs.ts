@@ -14,6 +14,15 @@ export const tradeLogsTable = traderSchema.table("trade_logs", {
   success: boolean("success").notNull().default(true),
   errorMessage: text("error_message"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+  mode: text("mode").notNull().default("paper"),
+  confidence: integer("confidence").notNull().default(0),
+  signals: text("signals"),
+  plannedStopLoss: real("planned_stop_loss"),
+  plannedTakeProfit: real("planned_take_profit"),
+  closedAt: timestamp("closed_at"),
+  closePrice: real("close_price"),
+  realizedPnl: real("realized_pnl"),
+  closeReason: text("close_reason"),
 });
 
 export const insertTradeLogSchema = createInsertSchema(tradeLogsTable).omit({ id: true, createdAt: true });

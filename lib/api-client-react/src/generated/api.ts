@@ -19,6 +19,7 @@ import type {
 import type {
   Account,
   AddWatchlistBody,
+  AgentStats,
   AgentStatus,
   AnalyzeBody,
   ApiError,
@@ -1536,6 +1537,81 @@ export const useAnalyzeAndTrade = <
 > => {
   return useMutation(getAnalyzeAndTradeMutationOptions(options));
 };
+
+/**
+ * @summary Paper/live trading stats, calibration, vs buy-and-hold
+ */
+export const getGetAgentStatsUrl = () => {
+  return `/api/agent/stats`;
+};
+
+export const getAgentStats = async (
+  options?: RequestInit,
+): Promise<AgentStats> => {
+  return customFetch<AgentStats>(getGetAgentStatsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetAgentStatsQueryKey = () => {
+  return [`/api/agent/stats`] as const;
+};
+
+export const getGetAgentStatsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAgentStats>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getAgentStats>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetAgentStatsQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getAgentStats>>> = ({
+    signal,
+  }) => getAgentStats({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAgentStats>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAgentStatsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAgentStats>>
+>;
+export type GetAgentStatsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Paper/live trading stats, calibration, vs buy-and-hold
+ */
+
+export function useGetAgentStats<
+  TData = Awaited<ReturnType<typeof getAgentStats>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getAgentStats>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAgentStatsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * @summary Get instruments the agent is watching

@@ -25,6 +25,13 @@ export const GetSettingsResponse = zod.object({
   maxOrderAmount: zod.number(),
   riskPercent: zod.number(),
   agentIntervalMinutes: zod.number(),
+  paperMode: zod.boolean(),
+  confidenceThreshold: zod.number(),
+  stopLossPercent: zod.number(),
+  takeProfitPercent: zod.number(),
+  dailyLossLimitRub: zod.number(),
+  maxTradesPerDay: zod.number(),
+  priceLimitPercent: zod.number(),
 });
 
 /**
@@ -37,6 +44,13 @@ export const UpdateSettingsBody = zod.object({
   maxOrderAmount: zod.number().nullish(),
   riskPercent: zod.number().nullish(),
   agentIntervalMinutes: zod.number().nullish(),
+  paperMode: zod.boolean().nullish(),
+  confidenceThreshold: zod.number().nullish(),
+  stopLossPercent: zod.number().nullish(),
+  takeProfitPercent: zod.number().nullish(),
+  dailyLossLimitRub: zod.number().nullish(),
+  maxTradesPerDay: zod.number().nullish(),
+  priceLimitPercent: zod.number().nullish(),
 });
 
 export const UpdateSettingsResponse = zod.object({
@@ -46,6 +60,13 @@ export const UpdateSettingsResponse = zod.object({
   maxOrderAmount: zod.number(),
   riskPercent: zod.number(),
   agentIntervalMinutes: zod.number(),
+  paperMode: zod.boolean(),
+  confidenceThreshold: zod.number(),
+  stopLossPercent: zod.number(),
+  takeProfitPercent: zod.number(),
+  dailyLossLimitRub: zod.number(),
+  maxTradesPerDay: zod.number(),
+  priceLimitPercent: zod.number(),
 });
 
 /**
@@ -262,6 +283,35 @@ export const StopAgentResponse = zod.object({
 export const AnalyzeAndTradeBody = zod.object({
   figi: zod.string().nullish(),
   executeIfConfident: zod.boolean(),
+});
+
+/**
+ * @summary Paper/live trading stats, calibration, vs buy-and-hold
+ */
+export const GetAgentStatsResponse = zod.object({
+  mode: zod.enum(["paper", "live"]),
+  totalDecisions: zod.number(),
+  totalTrades: zod.number(),
+  openPositions: zod.number(),
+  closedPositions: zod.number(),
+  winRate: zod.number(),
+  realizedPnl: zod.number(),
+  unrealizedPnl: zod.number(),
+  avgConfidence: zod.number(),
+  calibration: zod.array(
+    zod.object({
+      bucket: zod.string(),
+      decisions: zod.number(),
+      wins: zod.number(),
+      winRate: zod.number(),
+    }),
+  ),
+  vsBuyAndHold: zod.object({
+    agentReturnPct: zod.number(),
+    buyHoldReturnPct: zod.number(),
+  }),
+  dailyLossUsedRub: zod.number(),
+  dailyTradesUsed: zod.number(),
 });
 
 /**

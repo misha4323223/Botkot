@@ -11,20 +11,30 @@ async function getOrCreateSettings() {
   if (!row) {
     [row] = await db.insert(settingsTable).values({}).returning();
   }
-  // Return decrypted token to callers
   return { ...row, token: decryptString(row.token) };
 }
 
-router.get("/settings", async (_req, res): Promise<void> => {
-  const s = await getOrCreateSettings();
-  res.json({
+function publicView(s: Awaited<ReturnType<typeof getOrCreateSettings>>) {
+  return {
     hasToken: !!s.token,
     isSandbox: s.isSandbox,
     accountId: s.accountId,
     maxOrderAmount: s.maxOrderAmount,
     riskPercent: s.riskPercent,
     agentIntervalMinutes: s.agentIntervalMinutes,
-  });
+    paperMode: s.paperMode,
+    confidenceThreshold: s.confidenceThreshold,
+    stopLossPercent: s.stopLossPercent,
+    takeProfitPercent: s.takeProfitPercent,
+    dailyLossLimitRub: s.dailyLossLimitRub,
+    maxTradesPerDay: s.maxTradesPerDay,
+    priceLimitPercent: s.priceLimitPercent,
+  };
+}
+
+router.get("/settings", async (_req, res): Promise<void> => {
+  const s = await getOrCreateSettings();
+  res.json(publicView(s));
 });
 
 router.put("/settings", async (req, res): Promise<void> => {
@@ -34,27 +44,26 @@ router.put("/settings", async (req, res): Promise<void> => {
     return;
   }
 
-  const s = await getOrCreateSettings();
+  await getOrCreateSettings();
   const update: Partial<typeof settingsTable.$inferInsert> = {};
+  const d = parsed.data;
+  if (d.token != null) update.token = encryptString(d.token);
+  if (d.isSandbox != null) update.isSandbox = d.isSandbox;
+  if (d.accountId != null) update.accountId = d.accountId;
+  if (d.maxOrderAmount != null) update.maxOrderAmount = d.maxOrderAmount;
+  if (d.riskPercent != null) update.riskPercent = d.riskPercent;
+  if (d.agentIntervalMinutes != null) update.agentIntervalMinutes = d.agentIntervalMinutes;
+  if (d.paperMode != null) update.paperMode = d.paperMode;
+  if (d.confidenceThreshold != null) update.confidenceThreshold = d.confidenceThreshold;
+  if (d.stopLossPercent != null) update.stopLossPercent = d.stopLossPercent;
+  if (d.takeProfitPercent != null) update.takeProfitPercent = d.takeProfitPercent;
+  if (d.dailyLossLimitRub != null) update.dailyLossLimitRub = d.dailyLossLimitRub;
+  if (d.maxTradesPerDay != null) update.maxTradesPerDay = d.maxTradesPerDay;
+  if (d.priceLimitPercent != null) update.priceLimitPercent = d.priceLimitPercent;
 
-  if (parsed.data.token != null) update.token = encryptString(parsed.data.token);
-  if (parsed.data.isSandbox != null) update.isSandbox = parsed.data.isSandbox;
-  if (parsed.data.accountId != null) update.accountId = parsed.data.accountId;
-  if (parsed.data.maxOrderAmount != null) update.maxOrderAmount = parsed.data.maxOrderAmount;
-  if (parsed.data.riskPercent != null) update.riskPercent = parsed.data.riskPercent;
-  if (parsed.data.agentIntervalMinutes != null) update.agentIntervalMinutes = parsed.data.agentIntervalMinutes;
-
-  const [updated] = await db.update(settingsTable).set(update).returning();
-  const final = updated ?? { ...s, token: s.token ? encryptString(s.token) : null };
-
-  res.json({
-    hasToken: !!final.token,
-    isSandbox: final.isSandbox,
-    accountId: final.accountId,
-    maxOrderAmount: final.maxOrderAmount,
-    riskPercent: final.riskPercent,
-    agentIntervalMinutes: final.agentIntervalMinutes,
-  });
+  await db.update(settingsTable).set(update);
+  const fresh = await getOrCreateSettings();
+  res.json(publicView(fresh));
 });
 
 export { getOrCreateSettings };
