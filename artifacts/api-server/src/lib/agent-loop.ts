@@ -27,17 +27,27 @@ interface RawPos {
 
 async function getAccountContext(token: string, accountId: string, isSandbox: boolean): Promise<AccountCtx> {
   try {
-    const data = await tinkoffPost<{
-      positions?: RawPos[];
-      virtualPositions?: RawPos[];
-      totalAmountCurrencies?: { units?: string; nano?: number };
-    }>(
-      "/tinkoff.public.invest.api.contract.v1.OperationsService/GetPortfolio",
-      { accountId, currency: "RUB" },
-      token,
-      isSandbox
-    );
-    const all = [...(data.positions ?? []), ...(data.virtualPositions ?? [])];
+    const [portfolio, positionsData] = await Promise.all([
+      tinkoffPost<{
+        positions?: RawPos[];
+        virtualPositions?: RawPos[];
+      }>(
+        "/tinkoff.public.invest.api.contract.v1.OperationsService/GetPortfolio",
+        { accountId, currency: "RUB" },
+        token,
+        isSandbox,
+      ),
+      tinkoffPost<{
+        money?: { currency?: string; units?: string; nano?: number }[];
+        blocked?: { currency?: string; units?: string; nano?: number }[];
+      }>(
+        "/tinkoff.public.invest.api.contract.v1.OperationsService/GetPositions",
+        { accountId },
+        token,
+        isSandbox,
+      ),
+    ]);
+    const all = [...(portfolio.positions ?? []), ...(portfolio.virtualPositions ?? [])];
     const positions = all
       .filter(p => (p.instrumentType ?? "share") !== "currency")
       .map(p => ({
@@ -49,8 +59,13 @@ async function getAccountContext(token: string, accountId: string, isSandbox: bo
         pnl: parseMoneyValue(p.expectedYield),
       }))
       .filter(p => p.qty > 0);
-    return { cashRub: parseMoneyValue(data.totalAmountCurrencies), positions };
-  } catch {
+
+    const rubMoney = (positionsData.money ?? []).find(m => (m.currency ?? "").toLowerCase() === "rub");
+    const rubBlocked = (positionsData.blocked ?? []).find(b => (b.currency ?? "").toLowerCase() === "rub");
+    const free = parseMoneyValue(rubMoney) - parseMoneyValue(rubBlocked);
+    return { cashRub: Math.max(0, free), positions };
+  } catch (err) {
+    logger.error({ err }, "getAccountContext failed");
     return { cashRub: 0, positions: [] };
   }
 }
