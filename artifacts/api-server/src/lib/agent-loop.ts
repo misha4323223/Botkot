@@ -6,6 +6,32 @@ import { tinkoffPost, parseQuotation } from "./tinkoff";
 import { logger } from "./logger";
 import { randomUUID } from "crypto";
 
+/**
+ * MOEX main session: Mon–Fri 10:00–18:50 Moscow time (UTC+3).
+ * Evening session for some instruments: 19:05–23:50, but we skip it for safety.
+ */
+export function isMoexOpen(): { open: boolean; reason: string } {
+  const nowUtc = new Date();
+  // Moscow is UTC+3
+  const msk = new Date(nowUtc.getTime() + 3 * 60 * 60 * 1000);
+  const day = msk.getUTCDay(); // 0=Sun, 6=Sat
+  const h = msk.getUTCHours();
+  const m = msk.getUTCMinutes();
+  const timeMin = h * 60 + m;
+
+  if (day === 0 || day === 6) {
+    return { open: false, reason: `Биржа закрыта: выходной день (${day === 0 ? "воскресенье" : "суббота"})` };
+  }
+  // Main session: 10:00 (600) – 18:50 (1130)
+  if (timeMin < 600) {
+    return { open: false, reason: `Биржа ещё не открылась — откроется в 10:00 МСК (сейчас ${h}:${String(m).padStart(2, "0")} МСК)` };
+  }
+  if (timeMin >= 1130) {
+    return { open: false, reason: `Биржа закрыта — основная сессия до 18:50 МСК (сейчас ${h}:${String(m).padStart(2, "0")} МСК)` };
+  }
+  return { open: true, reason: "Биржа открыта" };
+}
+
 export async function getOrCreateSettingsForLoop() {
   const { settingsTable } = await import("@workspace/db");
   const rows = await db.select().from(settingsTable).limit(1);
@@ -121,28 +147,41 @@ export async function runAgentCycle(specificFigi: string | null) {
   logger.info({ decision, ticker: target.ticker, confidence }, "Agent cycle decision");
 
   if (decision !== "hold" && confidence >= 80) {
-    try {
-      await tinkoffPost(
-        s.isSandbox
-          ? "/tinkoff.public.invest.api.contract.v1.SandboxService/PostSandboxOrder"
-          : "/tinkoff.public.invest.api.contract.v1.OrdersService/PostOrder",
-        {
-          figi: target.figi,
-          quantity: "1",
-          direction: decision === "buy" ? "ORDER_DIRECTION_BUY" : "ORDER_DIRECTION_SELL",
-          accountId: s.accountId ?? "",
-          orderType: "ORDER_TYPE_MARKET",
-          orderId: randomUUID(),
-        },
-        s.token,
-        s.isSandbox
-      );
-      agentState.totalTradesExecuted++;
-      await db.insert(tradeLogsTable).values({ figi: target.figi, ticker: target.ticker, action: decision as "buy" | "sell", quantity: 1, price: currentPrice || null, aiReasoning: text, success: true });
-      logger.info({ ticker: target.ticker, decision, confidence }, "Trade executed by agent");
-    } catch (err) {
-      await db.insert(tradeLogsTable).values({ figi: target.figi, ticker: target.ticker, action: decision as "buy" | "sell", aiReasoning: text, success: false, errorMessage: err instanceof Error ? err.message : "Unknown" });
-      logger.error({ err, ticker: target.ticker }, "Trade execution failed");
+    const market = isMoexOpen();
+    if (!market.open) {
+      // Market is closed — log analysis but skip trade
+      logger.info({ ticker: target.ticker, reason: market.reason }, "Trade skipped: market closed");
+      await db.insert(tradeLogsTable).values({
+        figi: target.figi,
+        ticker: target.ticker,
+        action: "hold",
+        aiReasoning: `${text}\n\n⏰ Сделка не исполнена: ${market.reason}`,
+        success: true,
+      });
+    } else {
+      try {
+        await tinkoffPost(
+          s.isSandbox
+            ? "/tinkoff.public.invest.api.contract.v1.SandboxService/PostSandboxOrder"
+            : "/tinkoff.public.invest.api.contract.v1.OrdersService/PostOrder",
+          {
+            figi: target.figi,
+            quantity: "1",
+            direction: decision === "buy" ? "ORDER_DIRECTION_BUY" : "ORDER_DIRECTION_SELL",
+            accountId: s.accountId ?? "",
+            orderType: "ORDER_TYPE_MARKET",
+            orderId: randomUUID(),
+          },
+          s.token,
+          s.isSandbox
+        );
+        agentState.totalTradesExecuted++;
+        await db.insert(tradeLogsTable).values({ figi: target.figi, ticker: target.ticker, action: decision as "buy" | "sell", quantity: 1, price: currentPrice || null, aiReasoning: text, success: true });
+        logger.info({ ticker: target.ticker, decision, confidence }, "Trade executed by agent");
+      } catch (err) {
+        await db.insert(tradeLogsTable).values({ figi: target.figi, ticker: target.ticker, action: decision as "buy" | "sell", aiReasoning: text, success: false, errorMessage: err instanceof Error ? err.message : "Unknown" });
+        logger.error({ err, ticker: target.ticker }, "Trade execution failed");
+      }
     }
   } else {
     await db.insert(tradeLogsTable).values({ figi: target.figi, ticker: target.ticker, action: "hold", aiReasoning: text, success: true });

@@ -6,7 +6,7 @@ import { AnalyzeAndTradeBody, AddToWatchlistBody } from "@workspace/api-zod";
 import { agentState, getAgentStatusResponse } from "../lib/agent-state";
 import { getOrCreateSettings } from "./settings";
 import { tinkoffPost, parseMoneyValue, parseQuotation } from "../lib/tinkoff";
-import { getCandleSummary, startAgentLoop, stopAgentLoop, runAgentCycle } from "../lib/agent-loop";
+import { getCandleSummary, startAgentLoop, stopAgentLoop, runAgentCycle, isMoexOpen } from "../lib/agent-loop";
 import { randomUUID } from "crypto";
 import { logger } from "../lib/logger";
 
@@ -185,6 +185,14 @@ ${logContext}
     agentState.lastAction = `${action.toUpperCase()} ${targetTicker} (${confidence}%)`;
 
     if (executeIfConfident && (action === "buy" || action === "sell") && confidence >= 80) {
+      const market = isMoexOpen();
+      if (!market.open) {
+        sendEvent({ type: "thinking", message: `⏰ ${market.reason}. Анализ сохранён, сделка отложена до открытия биржи (10:00 МСК).` });
+        await db.insert(tradeLogsTable).values({ figi: targetFigi, ticker: targetTicker, action: "hold", aiReasoning: `${fullResponse}\n\n⏰ Сделка не исполнена: ${market.reason}`, success: true });
+        sendEvent({ done: true });
+        res.end();
+        return;
+      }
       sendEvent({ type: "thinking", message: `Уверенность ${confidence}% ≥ 80% — исполняю: ${action === "buy" ? "КУПИТЬ" : "ПРОДАТЬ"} ${targetTicker}...` });
       try {
         await tinkoffPost(
