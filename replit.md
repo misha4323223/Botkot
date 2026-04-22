@@ -126,12 +126,53 @@ See the `pnpm-workspace` skill for workspace structure and package details.
 
 ## Recently shipped
 
-- News context for the AI: `artifacts/api-server/src/lib/news.ts` fetches the
-  Финам company-news RSS and MOEX `sitenews.json`, filters by ticker symbol +
-  Russian aliases (Сбер, Газпром, ВТБ, Яндекс, Русал, ...), drops items older
-  than 7 days, caches per ticker for 10 min with a 5s fetch timeout. Wired into
-  both the autonomous `agent-loop.ts` per-ticker prompt and the manual SSE
-  analyze route in `routes/agent.ts`.
+### 2026-04-22 — News context for the AI
+- New module `artifacts/api-server/src/lib/news.ts`:
+  - Sources: Финам company-news RSS (`https://www.finam.ru/analysis/conews/rsspoint/`)
+    and MOEX `https://iss.moex.com/iss/sitenews.json?lang=ru&limit=50`.
+  - Filter: ticker symbol + Russian aliases dictionary (`TICKER_ALIASES`) for
+    35+ tickers (Сбер, Газпром, ВТБ, Яндекс, Русал, Совкомбанк, Лукойл,
+    Роснефть, Татнефть, Новатэк, Норникель, Полюс, Северсталь, НЛМК, МТС,
+    Аэрофлот, Алроса, Позитив, Озон, Тинькофф/Т-Банк, X5/Пятёрочка, Мосбиржа,
+    ПИК, ЛСР, Самолёт, Фосагро, Акрон, ММК, Ростелеком, ФСК/Россети, Русгидро,
+    Интер РАО, и пр.). Add new tickers here when expanding the watchlist.
+  - Drops items older than 7 days, max 6 items per ticker.
+  - Two-layer cache: per-source feed (10 min) + per-ticker filtered result (10 min).
+  - 5s fetch timeout with `AbortController`; degrades silently to last-cached or empty.
+  - HTML entity decoding (`&quot;`, `&laquo;`, `&#NNN;`, etc.) and CDATA stripping.
+  - Exported helpers: `getNewsForTicker(ticker)` and `formatNewsForPrompt(items)`.
+- Wired into the prompt in two places:
+  - Autonomous loop: `artifacts/api-server/src/lib/agent-loop.ts` — per-ticker
+    prompt now contains a "Свежие новости по бумаге" block before the decisions
+    history.
+  - Manual SSE analyze: `artifacts/api-server/src/routes/agent.ts` — emits a
+    `thinking` SSE event "Подгружаю свежие новости по {TICKER}..." then injects
+    a "═══ СВЕЖИЕ НОВОСТИ ПО БУМАГЕ ═══" section into the user prompt.
+- Verified live: SBER (рекордные дивиденды 37,64 ₽), GAZP (новые залежи,
+  энергоблоки), VTBR (падение на заявлениях Костина о допкапитале), YDEX
+  (финальные дивиденды 110 ₽). For thin names without coverage (RUAL, SVCB,
+  LNZLP) returns empty block instead of hallucinating.
+
+### Known gaps / next priorities (discussed 2026-04-22, not yet implemented)
+1. **Stop-loss / take-profit executor** — AI emits levels but no watcher
+   enforces them between cycles. Need a 30–60s polling loop on open positions
+   or real conditional orders via Tinkoff API.
+2. **Balance vs lot size** — live account ~200₽, `max_order_amount`=200₽,
+   cheapest watchlist lot SBER 326₽ → system physically cannot trade. Either
+   top up to ~3000₽ or add cheap-lot tickers (VTBR ~100₽, RUAL ~40₽, FEES).
+3. **Confidence calibration** — 64% of 174 decisions land in 90–100% bucket.
+   Feed the AI a daily summary of how its high-confidence calls actually
+   performed (post-mortem reflection).
+4. **Order book / spread awareness** — currently uses `lastPrice` only; thin
+   names have 1–3% spread. Pull `getOrderBook` before placing.
+5. **Trading session check** — block orders during MOEX opening auction
+   (09:50–10:00) and weekend sessions where appropriate.
+6. **Order status tracking** — confirm limit orders fill, cancel stale ones.
+7. **Portfolio concentration / correlation guard** — prevent piling into
+   correlated names (e.g., 3 oil stocks).
+8. Macro snapshot (key rate, USD/RUB, Brent, RTS) as a structured prompt block.
+9. Dividend / earnings calendar to avoid unintended ex-div entries.
+10. Log of rejected ideas (not just executed ones) for transparency.
 - UI panels on the agent page wired to `GET /agent/per-ticker-stats`,
   `GET /agent/equity-curve`, and `DELETE /agent/paper/reset`:
   - "Как растёт прибыль ИИ" — equity curve line chart (recharts), refetched every 30s
