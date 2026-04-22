@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db, watchlistTable, tradeLogsTable } from "@workspace/db";
 import { eq, desc, and, isNull, isNotNull, gte } from "drizzle-orm";
-import { openai } from "@workspace/integrations-openai-ai-server";
+import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { AnalyzeAndTradeBody, AddToWatchlistBody } from "@workspace/api-zod";
 import { agentState, getAgentStatusResponse } from "../lib/agent-state";
 import { getOrCreateSettings } from "./settings";
@@ -185,19 +185,18 @@ ${logContext}
     agentState.lastRunAt = new Date();
 
     let fullResponse = "";
-    const stream = await openai.chat.completions.create({
-      model: "gpt-4.1",
-      max_completion_tokens: 1500,
+    const stream = anthropic.messages.stream({
+      model: "claude-sonnet-4-6",
+      max_tokens: 8192,
+      system: systemPrompt,
       messages: [
-        { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      stream: true,
     });
 
-    for await (const chunk of stream) {
-      const content = chunk.choices[0]?.delta?.content;
-      if (content) {
+    for await (const event of stream) {
+      if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+        const content = event.delta.text;
         fullResponse += content;
         sendEvent({ type: "content", content });
       }

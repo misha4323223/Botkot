@@ -1,6 +1,6 @@
 import { db, watchlistTable, tradeLogsTable } from "@workspace/db";
 import { and, desc, eq, gte, isNull, sql } from "drizzle-orm";
-import { openai } from "@workspace/integrations-openai-ai-server";
+import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { agentState } from "./agent-state";
 import { tinkoffPost, parseQuotation, parseMoneyValue } from "./tinkoff";
 import { logger } from "./logger";
@@ -304,17 +304,19 @@ ${indexLine}
 История решений по этой бумаге:
 ${logCtx}`;
 
-  const response = await withRetry<{ choices: { message: { content?: string | null } }[] }>(() => openai.chat.completions.create({
-    model: "gpt-5.4",
-    max_completion_tokens: 8192,
+  const response = await withRetry<{ content: Array<{ type: string; text?: string }> }>(() => anthropic.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 8192,
+    system: `${systemPrompt}\n\nВАЖНО: Отвечай ТОЛЬКО валидным JSON-объектом, без markdown-обёртки и без пояснений вокруг.`,
     messages: [
-      { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
-    response_format: { type: "json_object" },
   }));
 
-  const raw = response.choices[0]?.message?.content ?? "";
+  const raw = response.content
+    .filter(b => b.type === "text")
+    .map(b => b.text ?? "")
+    .join("");
   const parsed = parseDecisionJson(raw);
   if (!parsed) {
     await db.insert(tradeLogsTable).values({
