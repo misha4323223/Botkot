@@ -9,10 +9,17 @@ import {
   useSearchInstruments,
   useGetAgentStats,
   useGetSuggestedTickers,
+  useGetPerTickerStats,
+  useGetEquityCurve,
+  useResetPaperTrades,
   getGetAgentStatusQueryKey,
   getGetWatchlistQueryKey,
-  getGetSuggestedTickersQueryKey
+  getGetSuggestedTickersQueryKey,
+  getGetAgentStatsQueryKey,
+  getGetPerTickerStatsQueryKey,
+  getGetEquityCurveQueryKey
 } from "@workspace/api-client-react";
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -39,6 +46,22 @@ export default function AgentPage() {
   const { data: watchlist, isLoading: isWatchlistLoading } = useGetWatchlist();
   const { data: stats } = useGetAgentStats({ query: { refetchInterval: 30000 } });
   const { data: suggested, isLoading: isLoadingSuggest, refetch: refetchSuggest, isFetching: isFetchingSuggest } = useGetSuggestedTickers();
+  const { data: perTicker } = useGetPerTickerStats({ query: { refetchInterval: 30000 } });
+  const { data: equity } = useGetEquityCurve({ query: { refetchInterval: 30000 } });
+  const resetPaper = useResetPaperTrades({
+    mutation: {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getGetAgentStatsQueryKey() });
+        queryClient.invalidateQueries({ queryKey: getGetPerTickerStatsQueryKey() });
+        queryClient.invalidateQueries({ queryKey: getGetEquityCurveQueryKey() });
+      }
+    }
+  });
+  const handleResetPaper = () => {
+    if (window.confirm("Удалить ВСЕ записи бумажных сделок? Это сбросит статистику и начнёт симуляцию заново.")) {
+      resetPaper.mutate();
+    }
+  };
 
   const startAgent = useStartAgent({
     mutation: { onSuccess: () => queryClient.invalidateQueries({ queryKey: getGetAgentStatusQueryKey() }) }
@@ -366,6 +389,115 @@ export default function AgentPage() {
               сегодня сделок: <span className="font-mono">{stats.dailyTradesUsed}</span> ·
               средняя уверенность ИИ: <span className="font-mono">{stats.avgConfidence.toFixed(0)}%</span>
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ГРАФИК ДИНАМИКИ ПРИБЫЛИ */}
+      {equity && equity.points.length > 1 && (
+        <Card className="bg-card border-border">
+          <CardHeader className="pb-2 pt-4 px-4">
+            <CardTitle className="text-base">Как растёт прибыль ИИ</CardTitle>
+            <CardDescription className="text-xs">
+              Накопленная прибыль/убыток по закрытым сделкам ({equity.tradesCount} шт.)
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="px-2 pb-3 pt-0">
+            <div className="text-center mb-2">
+              <span className="text-xs text-muted-foreground">Итого: </span>
+              <span className={`text-lg font-bold font-mono ${equity.totalPnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+                {equity.totalPnl >= 0 ? "+" : ""}₽{equity.totalPnl.toFixed(2)}
+              </span>
+            </div>
+            <ResponsiveContainer width="100%" height={180}>
+              <LineChart data={equity.points} margin={{ top: 5, right: 8, left: -15, bottom: 0 }}>
+                <XAxis dataKey="trade" tick={{ fontSize: 10, fill: "#888" }} label={{ value: "Сделка #", position: "insideBottom", offset: -2, style: { fontSize: 10, fill: "#888" } }} />
+                <YAxis tick={{ fontSize: 10, fill: "#888" }} tickFormatter={v => `₽${v}`} />
+                <Tooltip
+                  contentStyle={{ background: "rgba(20,20,28,0.95)", border: "1px solid #333", borderRadius: 6, fontSize: 12 }}
+                  labelFormatter={(l) => `Сделка #${l}`}
+                  formatter={(v: number) => [`₽${v.toFixed(2)}`, "Накоп. P&L"]}
+                />
+                <ReferenceLine y={0} stroke="#555" strokeDasharray="3 3" />
+                <Line type="monotone" dataKey="pnl" stroke={equity.totalPnl >= 0 ? "#4ade80" : "#f87171"} strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ЭФФЕКТИВНОСТЬ ПО БУМАГАМ */}
+      {perTicker && perTicker.tickers.length > 0 && (
+        <Card className="bg-card border-border">
+          <CardHeader className="pb-2 pt-4 px-4">
+            <CardTitle className="text-base">Эффективность по бумагам</CardTitle>
+            <CardDescription className="text-xs">
+              На каких акциях ИИ зарабатывает, а на каких теряет
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="px-3 pb-3 pt-0 space-y-1.5">
+            {perTicker.tickers.map(t => {
+              const total = t.totalPnl;
+              const totalColor = total > 0 ? "text-green-400" : total < 0 ? "text-red-400" : "text-muted-foreground";
+              return (
+                <div
+                  key={t.ticker}
+                  className={`rounded-md border p-2 ${
+                    total > 0 ? "border-green-700/30 bg-green-950/10" :
+                    total < 0 ? "border-red-700/30 bg-red-950/10" :
+                    "border-border bg-muted/5"
+                  }`}
+                >
+                  <div className="flex items-baseline justify-between gap-2 flex-wrap">
+                    <div className="flex items-baseline gap-2">
+                      <span className="font-mono font-bold text-sm">{t.ticker}</span>
+                      <span className="text-[11px] text-muted-foreground">
+                        решений: {t.decisions} (B:{t.buys} S:{t.sells} H:{t.holds})
+                      </span>
+                    </div>
+                    <span className={`font-mono font-bold text-sm ${totalColor}`}>
+                      {total >= 0 ? "+" : ""}₽{total.toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-muted-foreground mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5">
+                    {t.closedTrades > 0 && (
+                      <span>Закрыто: {t.closedTrades} (✓{t.wins} ✗{t.losses}) — {t.winRate.toFixed(0)}% побед</span>
+                    )}
+                    {t.openLots > 0 && (
+                      <span>Открыто: {t.openLots} лот.{t.unrealizedPnl !== 0 && (
+                        <span className={t.unrealizedPnl > 0 ? "text-green-400 ml-1" : "text-red-400 ml-1"}>
+                          ({t.unrealizedPnl >= 0 ? "+" : ""}₽{t.unrealizedPnl.toFixed(2)})
+                        </span>
+                      )}</span>
+                    )}
+                    <span>Уверенность: {t.avgConfidence.toFixed(0)}%</span>
+                  </div>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* СБРОС БУМАЖНОЙ СИМУЛЯЦИИ */}
+      {stats && stats.mode === "paper" && stats.totalDecisions > 0 && (
+        <Card className="bg-card border-border border-yellow-700/30">
+          <CardContent className="px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">Сбросить бумажную симуляцию</p>
+              <p className="text-xs text-muted-foreground">
+                Удалит все {stats.totalDecisions} решений и начнёт статистику с нуля
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-red-700/50 text-red-400 hover:bg-red-950/30 shrink-0"
+              onClick={handleResetPaper}
+              disabled={resetPaper.isPending}
+            >
+              <Trash2 className="w-3.5 h-3.5 mr-1.5" /> {resetPaper.isPending ? "Удаляю…" : "Сбросить"}
+            </Button>
           </CardContent>
         </Card>
       )}
