@@ -6,6 +6,7 @@ export interface AgentState {
   totalAnalyses: number;
   totalTradesExecuted: number;
   intervalId: ReturnType<typeof setInterval> | null;
+  watcherIntervalId: ReturnType<typeof setInterval> | null;
 }
 
 export const agentState: AgentState = {
@@ -16,6 +17,7 @@ export const agentState: AgentState = {
   totalAnalyses: 0,
   totalTradesExecuted: 0,
   intervalId: null,
+  watcherIntervalId: null,
 };
 
 export function getAgentStatusResponse(): {

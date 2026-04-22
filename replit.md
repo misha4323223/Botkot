@@ -126,6 +126,45 @@ See the `pnpm-workspace` skill for workspace structure and package details.
 
 ## Recently shipped
 
+### 2026-04-22 (later) — Top-3 critical fixes
+
+**1. Live stop-loss / take-profit executor + global position watcher.**
+- New `runPositionWatcherCycle()` in `agent-loop.ts` runs every **60s**
+  independently of the main agent cycle (which can be hour-long), wired into
+  `startAgentLoop` / `stopAgentLoop` via `agentState.watcherIntervalId`.
+- Batch fetches last prices for every open position in one
+  `MarketDataService/GetLastPrices` call (helper `getLastPrices`).
+- Paper mode: existing `reconcilePaperPositions` is now called for **all**
+  open paper positions, not just the ticker currently being analyzed.
+- Live mode: new `reconcileLivePositions(s)` — when `plannedStopLoss` /
+  `plannedTakeProfit` is touched, it places an aggressive opposite limit
+  order via Tinkoff `OrdersService/PostOrder` (with `priceLimitPercent`
+  slippage toward the touching side so it fills) and marks the trade_log
+  closed with `closedAt` / `closePrice` / `realizedPnl` / `closeReason`.
+  Only runs when `isMoexOpen()` returns true.
+
+**2. Cheap-lot watchlist seeder.** New `seedCheapTickers(s)` runs once on
+agent startup, idempotently adds VTBR / RUAL / FEES to `trader.watchlist` if
+missing (FIGIs resolved at runtime via `InstrumentsService/FindInstrument`,
+filtered to TQBR class / RUB currency). Solves the deadlock where balance
+~200₽ < cheapest existing lot 326₽. Verified: FEES added, VTBR/RUAL already
+present so skipped.
+
+**3. Confidence calibration feedback in the prompt.** New
+`getCalibrationSummary(mode)` looks at the last 30 days of CLOSED trades,
+buckets them by reported confidence (90-100%, 80-89%, 70-79%, <70%) and
+reports the realized win-rate and total P&L per bucket. The block is
+injected into the per-ticker prompt as
+`═══ ОБРАТНАЯ СВЯЗЬ ПО ТВОИМ ПРОШЛЫМ РЕШЕНИЯМ ═══`, with an instruction
+"если высокая уверенность даёт низкий win-rate — снижай уверенность".
+Self-correcting loop against the documented overconfidence (64% of decisions
+were in 90–100% bucket).
+
+Verified: server boots cleanly, log line
+`Agent loop + SL/TP watcher started cycleMin: 60 watcherSec: 60` confirms
+both intervals registered; first agent cycle ran (Agent decision SBER hold
+97% live).
+
 ### 2026-04-22 — News context for the AI
 - New module `artifacts/api-server/src/lib/news.ts`:
   - Sources: Финам company-news RSS (`https://www.finam.ru/analysis/conews/rsspoint/`)

@@ -233,6 +233,216 @@ async function reconcilePaperPositions(figi: string, currentPrice: number): Prom
   }
 }
 
+/**
+ * Batch fetch last prices for multiple FIGIs in one Tinkoff call.
+ * Returns a Map<figi, price>; missing prices are simply absent.
+ */
+async function getLastPrices(figis: string[], token: string, isSandbox: boolean): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (figis.length === 0) return out;
+  try {
+    const data = await tinkoffPost<{ lastPrices?: { figi?: string; price?: { units?: string; nano?: number } }[] }>(
+      "/tinkoff.public.invest.api.contract.v1.MarketDataService/GetLastPrices",
+      { figi: figis },
+      token,
+      isSandbox,
+    );
+    for (const lp of data.lastPrices ?? []) {
+      const p = parseQuotation(lp.price);
+      if (lp.figi && p > 0) out.set(lp.figi, p);
+    }
+  } catch (err) {
+    logger.error({ err, count: figis.length }, "getLastPrices failed");
+  }
+  return out;
+}
+
+/**
+ * Live SL/TP executor. For each open live position whose stop or take has been
+ * hit at currentPrice, place an opposite limit order with priceLimitPercent
+ * slippage and mark the trade_log as closed. Only runs when MOEX is open.
+ */
+async function reconcileLivePositions(s: Awaited<ReturnType<typeof getOrCreateSettingsForLoop>>): Promise<void> {
+  if (!s.token || !s.accountId) return;
+  const market = isMoexOpen();
+  if (!market.open) return;
+
+  const open = await db.select().from(tradeLogsTable).where(and(
+    eq(tradeLogsTable.mode, "live"),
+    eq(tradeLogsTable.success, true),
+    isNull(tradeLogsTable.closedAt),
+  ));
+  const tradeable = open.filter(p => (p.action === "buy" || p.action === "sell")
+    && (p.plannedStopLoss != null || p.plannedTakeProfit != null)
+    && (p.quantity ?? 0) > 0
+    && (p.price ?? 0) > 0);
+  if (tradeable.length === 0) return;
+
+  const figis = Array.from(new Set(tradeable.map(p => p.figi)));
+  const prices = await getLastPrices(figis, s.token, s.isSandbox ?? false);
+  const slip = (s.priceLimitPercent ?? 0.5) / 100;
+
+  for (const pos of tradeable) {
+    const cur = prices.get(pos.figi);
+    if (!cur || cur <= 0) continue;
+    const entry = pos.price ?? 0;
+    const isLong = pos.action === "buy";
+
+    let closeReason: string | null = null;
+    if (pos.plannedStopLoss != null) {
+      if (isLong && cur <= pos.plannedStopLoss) closeReason = "stop_loss";
+      if (!isLong && cur >= pos.plannedStopLoss) closeReason = "stop_loss";
+    }
+    if (!closeReason && pos.plannedTakeProfit != null) {
+      if (isLong && cur >= pos.plannedTakeProfit) closeReason = "take_profit";
+      if (!isLong && cur <= pos.plannedTakeProfit) closeReason = "take_profit";
+    }
+    if (!closeReason) continue;
+
+    // Convert units to lots for closing order (qty in trade_log was lots*lotSize)
+    const lotSize = await getInstrumentLot(pos.figi, s.token, s.isSandbox ?? false);
+    const lots = Math.max(1, Math.floor((pos.quantity ?? 0) / Math.max(1, lotSize)));
+
+    // Aggressive limit toward the touching side so it fills quickly
+    const limitPrice = isLong ? cur * (1 - slip) : cur * (1 + slip);
+    const units = Math.floor(limitPrice);
+    const nano = Math.round((limitPrice - units) * 1e9);
+
+    try {
+      await tinkoffPost(
+        "/tinkoff.public.invest.api.contract.v1.OrdersService/PostOrder",
+        {
+          figi: pos.figi,
+          quantity: String(lots),
+          direction: isLong ? "ORDER_DIRECTION_SELL" : "ORDER_DIRECTION_BUY",
+          accountId: s.accountId,
+          orderType: "ORDER_TYPE_LIMIT",
+          price: { units: String(units), nano },
+          orderId: randomUUID(),
+        },
+        s.token,
+        s.isSandbox ?? false,
+      );
+      const qty = pos.quantity ?? 0;
+      const pnl = isLong ? (cur - entry) * qty : (entry - cur) * qty;
+      await db.update(tradeLogsTable).set({
+        closedAt: new Date(),
+        closePrice: cur,
+        realizedPnl: pnl,
+        closeReason,
+      }).where(eq(tradeLogsTable.id, pos.id));
+      logger.info({ figi: pos.figi, ticker: pos.ticker, closeReason, pnl, cur }, "LIVE position closed by watcher");
+    } catch (err) {
+      logger.error({ err, figi: pos.figi, ticker: pos.ticker }, "LIVE close order failed");
+    }
+  }
+}
+
+/**
+ * Position watcher cycle — runs frequently (every 60s) independently of the
+ * main agent cycle. Closes paper positions in-DB and live positions via
+ * Tinkoff orders when SL/TP levels are touched.
+ */
+export async function runPositionWatcherCycle(): Promise<void> {
+  const s = await getOrCreateSettingsForLoop();
+  if (!s.token) return;
+
+  // Paper: pull all open paper positions, batch fetch prices, reconcile per-figi
+  const openPaper = await db.select().from(tradeLogsTable).where(and(
+    eq(tradeLogsTable.mode, "paper"),
+    isNull(tradeLogsTable.closedAt),
+  ));
+  const paperFigis = Array.from(new Set(openPaper
+    .filter(p => p.action === "buy" || p.action === "sell")
+    .map(p => p.figi)));
+  if (paperFigis.length > 0) {
+    const prices = await getLastPrices(paperFigis, s.token, s.isSandbox ?? false);
+    for (const f of paperFigis) {
+      const px = prices.get(f);
+      if (px && px > 0) await reconcilePaperPositions(f, px);
+    }
+  }
+
+  // Live: separate path because closing requires a real order
+  await reconcileLivePositions(s);
+}
+
+/**
+ * Compute calibration stats over the last 30 days of CLOSED trades.
+ * Bucketizes by reported confidence and reports realized win-rate per bucket.
+ * Returned as a short Russian text block to inject into the LLM prompt as a
+ * self-reflection tool — counters overconfidence by showing the model how
+ * its high-confidence calls have actually performed.
+ */
+async function getCalibrationSummary(mode: "paper" | "live"): Promise<string> {
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const closed = await db.select().from(tradeLogsTable).where(and(
+    eq(tradeLogsTable.mode, mode),
+    gte(tradeLogsTable.createdAt, since),
+  ));
+  const settled = closed.filter(r => r.closedAt != null && r.realizedPnl != null && (r.action === "buy" || r.action === "sell"));
+  if (settled.length < 3) return "Калибровка: пока недостаточно закрытых сделок (<3) для оценки качества прогнозов.";
+
+  const buckets: Array<{ label: string; lo: number; hi: number }> = [
+    { label: "90-100%", lo: 90, hi: 101 },
+    { label: "80-89%", lo: 80, hi: 90 },
+    { label: "70-79%", lo: 70, hi: 80 },
+    { label: "<70%", lo: 0, hi: 70 },
+  ];
+
+  const lines = buckets.map(b => {
+    const inB = settled.filter(r => (r.confidence ?? 0) >= b.lo && (r.confidence ?? 0) < b.hi);
+    if (inB.length === 0) return null;
+    const wins = inB.filter(r => (r.realizedPnl ?? 0) > 0).length;
+    const totalPnl = inB.reduce((a, r) => a + (r.realizedPnl ?? 0), 0);
+    const winRate = Math.round((wins / inB.length) * 100);
+    return `  • уверенность ${b.label}: ${inB.length} сделок, прибыльных ${wins} (${winRate}%), суммарный P&L ${totalPnl >= 0 ? "+" : ""}${totalPnl.toFixed(2)}₽`;
+  }).filter((x): x is string => x !== null);
+
+  if (lines.length === 0) return "Калибровка: нет закрытых сделок в учтённых бакетах уверенности.";
+  return `Твоя калибровка за 30 дней (${settled.length} закрытых сделок):\n${lines.join("\n")}\n→ Если высокая уверенность даёт низкий win-rate — снижай уверенность для следующих решений.`;
+}
+
+const CHEAP_TICKER_HINTS = ["VTBR", "RUAL", "FEES"];
+
+/**
+ * Add cheap-lot blue chips (VTBR, RUAL, FEES) to the watchlist if missing.
+ * Resolves FIGIs via Tinkoff FindInstrument. Idempotent. Called once on agent
+ * startup so the agent has at least some tickers it can actually afford.
+ */
+async function seedCheapTickers(s: Awaited<ReturnType<typeof getOrCreateSettingsForLoop>>): Promise<void> {
+  if (!s.token) return;
+  const existing = await db.select().from(watchlistTable);
+  const haveTickers = new Set(existing.map(w => w.ticker.toUpperCase()));
+  const toAdd = CHEAP_TICKER_HINTS.filter(t => !haveTickers.has(t));
+  if (toAdd.length === 0) return;
+
+  for (const ticker of toAdd) {
+    try {
+      const data = await tinkoffPost<{ instruments?: { figi?: string; ticker?: string; name?: string; classCode?: string; currency?: string }[] }>(
+        "/tinkoff.public.invest.api.contract.v1.InstrumentsService/FindInstrument",
+        { query: ticker, instrumentKind: "INSTRUMENT_TYPE_SHARE", apiTradeAvailableFlag: true },
+        s.token,
+        s.isSandbox ?? false,
+      );
+      const match = (data.instruments ?? []).find(i => (i.ticker ?? "").toUpperCase() === ticker
+        && (i.classCode === "TQBR" || (i.currency ?? "").toLowerCase() === "rub"));
+      if (!match?.figi) {
+        logger.warn({ ticker }, "seedCheapTickers: instrument not found");
+        continue;
+      }
+      await db.insert(watchlistTable).values({
+        figi: match.figi,
+        ticker,
+        name: match.name ?? ticker,
+      });
+      logger.info({ ticker, figi: match.figi }, "seedCheapTickers: added");
+    } catch (err) {
+      logger.error({ err, ticker }, "seedCheapTickers failed");
+    }
+  }
+}
+
 interface CycleResult {
   ticker: string;
   decision: string;
@@ -267,6 +477,8 @@ async function analyzeOneTicker(target: { figi: string; ticker: string }, s: Awa
 
   const news = await getNewsForTicker(target.ticker);
   const newsBlock = formatNewsForPrompt(news);
+
+  const calibrationBlock = await getCalibrationSummary(s.paperMode ? "paper" : "live");
 
   const indexLine = indexSnap
     ? `IMOEX за тот же период: изм. ${indexSnap.changePct.toFixed(1)}%, тренд ${indexSnap.trend}. Бумага vs индекс: ${(dailySnap.changePct - indexSnap.changePct >= 0 ? "+" : "")}${(dailySnap.changePct - indexSnap.changePct).toFixed(1)}%`
@@ -307,6 +519,9 @@ ${indexLine}
 
 Свежие новости по бумаге (последние, проверь нет ли санкций/дивидендов/корп.событий):
 ${newsBlock}
+
+═══ ОБРАТНАЯ СВЯЗЬ ПО ТВОИМ ПРОШЛЫМ РЕШЕНИЯМ ═══
+${calibrationBlock}
 
 История решений по этой бумаге:
 ${logCtx}`;
@@ -517,18 +732,35 @@ export async function startAgentLoop(): Promise<void> {
   agentState.isRunning = true;
   agentState.nextRunAt = new Date();
 
+  // One-shot: ensure cheap-lot blue chips are in the watchlist so the agent
+  // has something it can actually buy when balance is small.
+  seedCheapTickers(s).catch(err => logger.error({ err }, "seedCheapTickers failed"));
+
   const intervalMs = (s.agentIntervalMinutes ?? 60) * 60 * 1000;
   agentState.intervalId = setInterval(async () => {
     try { await runAgentCycle(null); } catch (err) { logger.error({ err }, "Agent cycle error"); }
   }, intervalMs);
 
+  // Independent SL/TP watcher — runs every 60s regardless of agent cycle so
+  // stops/takes are honored even between (potentially hour-long) cycles.
+  const watcherMs = 60 * 1000;
+  agentState.watcherIntervalId = setInterval(async () => {
+    try { await runPositionWatcherCycle(); } catch (err) { logger.error({ err }, "Position watcher error"); }
+  }, watcherMs);
+
+  logger.info({ cycleMin: s.agentIntervalMinutes ?? 60, watcherSec: 60 }, "Agent loop + SL/TP watcher started");
   runAgentCycle(null).catch(err => logger.error({ err }, "First agent cycle error"));
+  runPositionWatcherCycle().catch(err => logger.error({ err }, "First watcher cycle error"));
 }
 
 export function stopAgentLoop(): void {
   if (agentState.intervalId) {
     clearInterval(agentState.intervalId);
     agentState.intervalId = null;
+  }
+  if (agentState.watcherIntervalId) {
+    clearInterval(agentState.watcherIntervalId);
+    agentState.watcherIntervalId = null;
   }
   agentState.isRunning = false;
   agentState.nextRunAt = null;
