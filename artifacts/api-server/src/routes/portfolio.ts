@@ -1,8 +1,62 @@
 import { Router, type IRouter } from "express";
-import { tinkoffPost, parseMoneyValue } from "../lib/tinkoff";
+import { tinkoffPost, parseMoneyValue, parseQuotation } from "../lib/tinkoff";
 import { getOrCreateSettings } from "./settings";
+import { db, tradeLogsTable } from "@workspace/db";
+import { eq, and, isNull } from "drizzle-orm";
 
 const router: IRouter = Router();
+
+router.get("/portfolio/paper", async (_req, res): Promise<void> => {
+  const s = await getOrCreateSettings();
+  const rows = await db.select().from(tradeLogsTable).where(
+    and(eq(tradeLogsTable.mode, "paper"), eq(tradeLogsTable.success, true))
+  );
+
+  // Aggregate by ticker: net qty (buys − sells), weighted avg buy price
+  const map = new Map<string, { figi: string; ticker: string; qty: number; cost: number; trades: number }>();
+  for (const r of rows) {
+    if (r.action !== "buy" && r.action !== "sell") continue;
+    const key = r.ticker;
+    const cur = map.get(key) ?? { figi: r.figi, ticker: r.ticker, qty: 0, cost: 0, trades: 0 };
+    const qty = r.quantity ?? 1;
+    const price = r.price ?? 0;
+    if (r.action === "buy") { cur.qty += qty; cur.cost += qty * price; }
+    else { cur.qty -= qty; cur.cost -= qty * price; }
+    cur.trades += 1;
+    map.set(key, cur);
+  }
+
+  const open = Array.from(map.values()).filter(p => p.qty > 0);
+
+  // Fetch current prices
+  const figis = open.map(p => p.figi);
+  let prices: Record<string, number> = {};
+  if (figis.length > 0 && s.token) {
+    try {
+      const data = await tinkoffPost<{ lastPrices?: { figi?: string; price?: { units?: string; nano?: number } }[] }>(
+        "/tinkoff.public.invest.api.contract.v1.MarketDataService/GetLastPrices",
+        { figi: figis }, s.token, s.isSandbox
+      );
+      for (const lp of data.lastPrices ?? []) {
+        if (lp.figi) prices[lp.figi] = parseQuotation(lp.price);
+      }
+    } catch (_e) { /* ignore */ }
+  }
+
+  const positions = open.map(p => {
+    const avg = p.qty > 0 ? p.cost / p.qty : 0;
+    const cur = prices[p.figi] ?? 0;
+    const value = cur * p.qty;
+    const pnl = (cur - avg) * p.qty;
+    const pnlPct = avg > 0 ? ((cur - avg) / avg) * 100 : 0;
+    return { figi: p.figi, ticker: p.ticker, quantity: p.qty, averagePrice: avg, currentPrice: cur, currentValue: value, unrealizedPnl: pnl, unrealizedPnlPercent: pnlPct, trades: p.trades };
+  });
+
+  const totalValue = positions.reduce((a, p) => a + p.currentValue, 0);
+  const totalPnl = positions.reduce((a, p) => a + p.unrealizedPnl, 0);
+
+  res.json({ positions, totalValue, totalPnl, paperMode: s.paperMode });
+});
 
 router.get("/portfolio/accounts", async (req, res): Promise<void> => {
   const s = await getOrCreateSettings();
