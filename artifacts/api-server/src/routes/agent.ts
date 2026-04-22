@@ -137,6 +137,11 @@ async function analyzeOne(
     sendEvent({ type: "thinking", message: `Загружаю историю свечей ${targetTicker} за 30 дней...` });
     const candleSummaryText = await getCandleSummary(targetFigi, s.token, s.isSandbox ?? false);
 
+    sendEvent({ type: "thinking", message: `Подгружаю свежие новости по ${targetTicker}...` });
+    const { getNewsForTicker, formatNewsForPrompt } = await import("../lib/news");
+    const newsItems = await getNewsForTicker(targetTicker);
+    const newsBlock = formatNewsForPrompt(newsItems);
+
     const recentLogs = await db.select().from(tradeLogsTable).orderBy(desc(tradeLogsTable.createdAt)).limit(5);
     const logContext = recentLogs.length > 0
       ? recentLogs.map((l) => `${new Date(l.createdAt).toLocaleDateString("ru-RU")} ${l.action.toUpperCase()} ${l.ticker}: ${l.aiReasoning.slice(0, 120)}`).join("\n")
@@ -163,6 +168,9 @@ ${portfolioSummary}
 Текущая цена: ${currentPrice > 0 ? `${currentPrice.toFixed(2)} ₽` : "недоступна"}
 
 ${candleSummaryText}
+
+═══ СВЕЖИЕ НОВОСТИ ПО БУМАГЕ ═══
+${newsBlock}
 
 ═══ ИСТОРИЯ РЕШЕНИЙ ═══
 ${logContext}

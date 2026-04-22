@@ -6,6 +6,7 @@ import { tinkoffPost, parseQuotation, parseMoneyValue } from "./tinkoff";
 import { logger } from "./logger";
 import { withRetry } from "./openai-retry";
 import { computeSnapshot, interpretSnapshot, type Candle, type IndicatorSnapshot } from "./indicators";
+import { getNewsForTicker, formatNewsForPrompt } from "./news";
 import { randomUUID } from "crypto";
 
 const IMOEX_FIGI = "BBG004730ZJ9";
@@ -264,6 +265,9 @@ async function analyzeOneTicker(target: { figi: string; ticker: string }, s: Awa
   const dailyNotes = interpretSnapshot(dailySnap);
   const hourlyNotes = hourlySnap ? interpretSnapshot(hourlySnap) : [];
 
+  const news = await getNewsForTicker(target.ticker);
+  const newsBlock = formatNewsForPrompt(news);
+
   const indexLine = indexSnap
     ? `IMOEX за тот же период: изм. ${indexSnap.changePct.toFixed(1)}%, тренд ${indexSnap.trend}. Бумага vs индекс: ${(dailySnap.changePct - indexSnap.changePct >= 0 ? "+" : "")}${(dailySnap.changePct - indexSnap.changePct).toFixed(1)}%`
     : "IMOEX недоступен";
@@ -300,6 +304,9 @@ ${hourlySnap ? `ЧАСОВЫЕ (5д, ${hourlyCandles.length} свечей): из
 ${hourlyNotes.map(n => `• ${n}`).join("\n")}` : "Часовые свечи недоступны."}
 
 ${indexLine}
+
+Свежие новости по бумаге (последние, проверь нет ли санкций/дивидендов/корп.событий):
+${newsBlock}
 
 История решений по этой бумаге:
 ${logCtx}`;

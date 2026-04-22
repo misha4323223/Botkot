@@ -126,6 +126,12 @@ See the `pnpm-workspace` skill for workspace structure and package details.
 
 ## Recently shipped
 
+- News context for the AI: `artifacts/api-server/src/lib/news.ts` fetches the
+  Финам company-news RSS and MOEX `sitenews.json`, filters by ticker symbol +
+  Russian aliases (Сбер, Газпром, ВТБ, Яндекс, Русал, ...), drops items older
+  than 7 days, caches per ticker for 10 min with a 5s fetch timeout. Wired into
+  both the autonomous `agent-loop.ts` per-ticker prompt and the manual SSE
+  analyze route in `routes/agent.ts`.
 - UI panels on the agent page wired to `GET /agent/per-ticker-stats`,
   `GET /agent/equity-curve`, and `DELETE /agent/paper/reset`:
   - "Как растёт прибыль ИИ" — equity curve line chart (recharts), refetched every 30s
