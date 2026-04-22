@@ -78,6 +78,33 @@ export type AgentStatsVsBuyAndHold = {
   buyHoldReturnPct: number;
 };
 
+export type AgentStatsAffordabilityItem = {
+  ticker: string;
+  figi: string;
+  lastPrice: number;
+  lot: number;
+  lotPriceRub: number;
+  canAffordLots: number;
+};
+
+export type AgentStatsRecentDecisionsItem = {
+  id: number;
+  ticker: string;
+  action: string;
+  confidence: number;
+  executed: boolean;
+  /** @nullable */
+  skipReason?: string | null;
+  reasoning: string;
+  /** @nullable */
+  quantity?: number | null;
+  /** @nullable */
+  price?: number | null;
+  /** @nullable */
+  realizedPnl?: number | null;
+  createdAt: string;
+};
+
 export interface AgentStats {
   mode: AgentStatsMode;
   totalDecisions: number;
@@ -92,6 +119,12 @@ export interface AgentStats {
   vsBuyAndHold: AgentStatsVsBuyAndHold;
   dailyLossUsedRub: number;
   dailyTradesUsed: number;
+  cashRub: number;
+  affordability: AgentStatsAffordabilityItem[];
+  recentDecisions: AgentStatsRecentDecisionsItem[];
+  buyCount: number;
+  sellCount: number;
+  holdCount: number;
 }
 
 export interface Account {

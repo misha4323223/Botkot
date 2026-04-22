@@ -19,17 +19,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { Bot, Play, Square, Trash2, TerminalSquare, Search, Plus, Check, ShieldAlert } from "lucide-react";
-
-function Stat({ label, value, tone }: { label: string; value: string | number; tone?: "good" | "bad" | "neutral" }) {
-  const color = tone === "good" ? "text-green-500" : tone === "bad" ? "text-red-500" : "text-foreground";
-  return (
-    <div className="rounded-lg border border-border/50 bg-muted/10 p-3">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className={`text-lg font-bold font-mono ${color}`}>{value}</div>
-    </div>
-  );
-}
+import { Bot, Play, Square, Trash2, TerminalSquare, Search, Plus, Check, ShieldAlert, Wallet, AlertTriangle, CheckCircle2, XCircle, MinusCircle } from "lucide-react";
+import { format } from "date-fns";
+import { ru } from "date-fns/locale";
 
 export default function AgentPage() {
   const queryClient = useQueryClient();
@@ -97,7 +89,7 @@ export default function AgentPage() {
         }
       }
     } catch {
-      setStreamData(prev => prev + "\n[ERROR] Stream interrupted.");
+      setStreamData(prev => prev + "\n[ОШИБКА] Поток прерван.");
     } finally {
       setIsStreaming(false);
       queryClient.invalidateQueries({ queryKey: getGetAgentStatusQueryKey() });
@@ -106,18 +98,23 @@ export default function AgentPage() {
 
   const isInWatchlist = (figi: string) => watchlist?.some(w => w.figi === figi);
 
+  // Сводка по доступности денег
+  const cashRub = stats?.cashRub ?? 0;
+  const affordable = (stats?.affordability ?? []).filter(a => a.canAffordLots > 0);
+  const tooExpensive = (stats?.affordability ?? []).filter(a => a.canAffordLots === 0 && a.lotPriceRub > 0);
+
   return (
-    <div className="space-y-4 max-w-7xl mx-auto">
+    <div className="space-y-4 max-w-7xl mx-auto pb-4">
       {/* Header */}
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-2xl lg:text-3xl font-bold tracking-tight truncate">ИИ-агент</h1>
-          <p className="text-muted-foreground text-sm mt-0.5 hidden sm:block">Автономная торговля и список наблюдения</p>
+          <p className="text-muted-foreground text-sm mt-0.5 hidden sm:block">Что делает ИИ с вашими деньгами</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {status && (
             <Badge variant="outline" className={`px-2 py-1 text-xs ${status.isRunning ? "border-green-500 text-green-500" : "border-muted-foreground text-muted-foreground"}`}>
-              {status.isRunning ? "Активен" : "Пауза"}
+              {status.isRunning ? "Работает" : "Остановлен"}
             </Badge>
           )}
           {status?.isRunning ? (
@@ -132,40 +129,203 @@ export default function AgentPage() {
         </div>
       </div>
 
-      {/* Stats dashboard */}
+      {/* МОНЕТКИ — что с деньгами */}
       {stats && (
         <Card className="bg-card border-border">
-          <CardHeader className="pb-3 pt-4 px-4 flex flex-row items-center justify-between">
-            <div>
-              <CardTitle className="text-base">Статистика агента</CardTitle>
-              <CardDescription className="text-xs">
-                Режим: <span className={stats.mode === "paper" ? "text-blue-400 font-bold" : "text-yellow-400 font-bold"}>{stats.mode === "paper" ? "PAPER (симуляция)" : "LIVE (боевой)"}</span>
-                {" · "}Готовность к live: P&L &gt; 0, win-rate &gt; 55%, обыгрывает buy-and-hold за 2 недели
-              </CardDescription>
-            </div>
+          <CardHeader className="pb-2 pt-4 px-4">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Wallet className="w-4 h-4" /> Деньги и что ИИ может купить
+            </CardTitle>
           </CardHeader>
-          <CardContent className="px-4 pb-4">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-              <Stat label="Решений" value={stats.totalDecisions} />
-              <Stat label="Сделок (откр./закр.)" value={`${stats.openPositions} / ${stats.closedPositions}`} />
-              <Stat label="Доля прибыльных" value={`${stats.winRate.toFixed(1)}%`} tone={stats.winRate >= 55 ? "good" : stats.closedPositions === 0 ? "neutral" : "bad"} />
-              <Stat label="Закрытый P&L" value={`${stats.realizedPnl >= 0 ? "+" : ""}${stats.realizedPnl.toFixed(2)}₽`} tone={stats.realizedPnl >= 0 ? "good" : "bad"} />
-              <Stat label="Открытый P&L" value={`${stats.unrealizedPnl >= 0 ? "+" : ""}${stats.unrealizedPnl.toFixed(2)}₽`} tone={stats.unrealizedPnl >= 0 ? "good" : "bad"} />
-              <Stat label="Ср. уверенность" value={`${stats.avgConfidence.toFixed(0)}%`} />
-              <Stat label="Агент / купи-и-держи" value={`${stats.vsBuyAndHold.agentReturnPct.toFixed(1)}% / ${stats.vsBuyAndHold.buyHoldReturnPct.toFixed(1)}%`} tone={stats.vsBuyAndHold.agentReturnPct >= stats.vsBuyAndHold.buyHoldReturnPct ? "good" : "bad"} />
-              <Stat label="Сегодня: сделок / убыток" value={`${stats.dailyTradesUsed} / ${stats.dailyLossUsedRub.toFixed(0)}₽`} />
+          <CardContent className="px-4 pb-4 space-y-3">
+            <div className="flex items-baseline gap-3 flex-wrap">
+              <div className="text-3xl font-bold font-mono">₽{cashRub.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              <div className="text-sm text-muted-foreground">— свободно на счёте, ИИ это видит</div>
             </div>
-            <div>
-              <p className="text-xs font-medium text-muted-foreground mb-2">Калибровка уверенности (по закрытым сделкам):</p>
-              <div className="grid grid-cols-5 gap-1">
-                {stats.calibration.map(b => (
-                  <div key={b.bucket} className="text-center p-2 rounded border border-border/50 bg-muted/10">
-                    <div className="text-[10px] text-muted-foreground">{b.bucket}</div>
-                    <div className="text-sm font-bold font-mono">{b.decisions > 0 ? `${b.winRate.toFixed(0)}%` : "—"}</div>
-                    <div className="text-[10px] text-muted-foreground">{b.decisions} сд.</div>
+
+            {stats.affordability.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Добавьте акции в список наблюдения, чтобы увидеть, что ИИ может купить.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {affordable.length > 0 && (
+                  <div className="rounded-md border border-green-700/40 bg-green-950/20 p-3">
+                    <p className="text-xs font-medium text-green-400 mb-2 flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> На эти деньги хватит:
+                    </p>
+                    <div className="space-y-1">
+                      {affordable.map(a => (
+                        <div key={a.figi} className="flex items-center justify-between text-sm">
+                          <span className="font-mono font-bold">{a.ticker}</span>
+                          <span className="text-muted-foreground text-xs">
+                            {a.canAffordLots} лот ({a.canAffordLots * a.lot} шт.) · 1 лот = ₽{a.lotPriceRub.toFixed(2)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                ))}
+                )}
+                {tooExpensive.length > 0 && (
+                  <div className="rounded-md border border-yellow-700/40 bg-yellow-950/20 p-3">
+                    <p className="text-xs font-medium text-yellow-400 mb-2 flex items-center gap-1">
+                      <AlertTriangle className="w-3.5 h-3.5" /> Не хватает даже на 1 лот:
+                    </p>
+                    <div className="space-y-1">
+                      {tooExpensive.map(a => (
+                        <div key={a.figi} className="flex items-center justify-between text-sm">
+                          <span className="font-mono font-bold">{a.ticker}</span>
+                          <span className="text-muted-foreground text-xs">
+                            нужно ₽{a.lotPriceRub.toFixed(2)} за 1 лот ({a.lot} шт. × ₽{a.lastPrice.toFixed(2)})
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    {cashRub < 1000 && (
+                      <p className="text-xs text-yellow-300/80 mt-2">
+                        💡 Чтобы ИИ начал покупать, пополните счёт хотя бы на сумму одного лота. Самый дешёвый из ваших — {tooExpensive.sort((a, b) => a.lotPriceRub - b.lotPriceRub)[0]?.ticker} за ₽{tooExpensive.sort((a, b) => a.lotPriceRub - b.lotPriceRub)[0]?.lotPriceRub.toFixed(0)}.
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ЧТО СДЕЛАЛ ИИ — простая сводка */}
+      {stats && (
+        <Card className="bg-card border-border">
+          <CardHeader className="pb-2 pt-4 px-4">
+            <CardTitle className="text-base">Что сделал ИИ</CardTitle>
+            <CardDescription className="text-xs">
+              Режим: <span className={stats.mode === "paper" ? "text-blue-400 font-bold" : "text-yellow-400 font-bold"}>{stats.mode === "paper" ? "PAPER (тренировка, без реальных денег)" : "LIVE (реальные сделки)"}</span>
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="px-4 pb-4 space-y-4">
+            {/* Действия в простом виде */}
+            <div className="grid grid-cols-3 gap-2">
+              <div className="rounded-lg border border-green-700/40 bg-green-950/20 p-3 text-center">
+                <div className="text-2xl font-bold font-mono text-green-400">{stats.buyCount}</div>
+                <div className="text-[11px] text-muted-foreground uppercase tracking-wider mt-0.5">Покупок</div>
+              </div>
+              <div className="rounded-lg border border-red-700/40 bg-red-950/20 p-3 text-center">
+                <div className="text-2xl font-bold font-mono text-red-400">{stats.sellCount}</div>
+                <div className="text-[11px] text-muted-foreground uppercase tracking-wider mt-0.5">Продаж</div>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/20 p-3 text-center">
+                <div className="text-2xl font-bold font-mono text-muted-foreground">{stats.holdCount}</div>
+                <div className="text-[11px] text-muted-foreground uppercase tracking-wider mt-0.5">Без действий</div>
+              </div>
+            </div>
+
+            {/* Открытые / закрытые */}
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-lg border border-border/50 bg-muted/10 p-3">
+                <div className="text-xs text-muted-foreground">Сейчас в позициях</div>
+                <div className="text-xl font-bold font-mono">{stats.openPositions}</div>
+                <div className={`text-xs font-mono mt-1 ${stats.unrealizedPnl >= 0 ? "text-green-500" : "text-red-500"}`}>
+                  {stats.unrealizedPnl >= 0 ? "+" : ""}{stats.unrealizedPnl.toFixed(2)} ₽ (бумажный P&L)
+                </div>
+              </div>
+              <div className="rounded-lg border border-border/50 bg-muted/10 p-3">
+                <div className="text-xs text-muted-foreground">Закрытые сделки</div>
+                <div className="text-xl font-bold font-mono">{stats.closedPositions}</div>
+                <div className={`text-xs font-mono mt-1 ${stats.realizedPnl >= 0 ? "text-green-500" : "text-red-500"}`}>
+                  {stats.realizedPnl >= 0 ? "+" : ""}{stats.realizedPnl.toFixed(2)} ₽ (зафиксировано)
+                </div>
+              </div>
+            </div>
+
+            {/* Доля прибыльных */}
+            {stats.closedPositions > 0 ? (
+              <div className="rounded-lg border border-border/50 bg-muted/10 p-3">
+                <div className="flex justify-between items-baseline mb-1">
+                  <span className="text-sm">Доля прибыльных сделок</span>
+                  <span className={`text-lg font-bold font-mono ${stats.winRate >= 55 ? "text-green-500" : "text-red-500"}`}>
+                    {stats.winRate.toFixed(1)}%
+                  </span>
+                </div>
+                <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+                  <div className={`h-full ${stats.winRate >= 55 ? "bg-green-500" : "bg-red-500"}`} style={{ width: `${stats.winRate}%` }} />
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-1.5">
+                  Из {stats.closedPositions} закрытых — {Math.round(stats.closedPositions * stats.winRate / 100)} в плюс. Хорошо: 55%+.
+                </p>
+              </div>
+            ) : (
+              <div className="rounded-lg border border-border/50 bg-muted/10 p-3 text-center text-sm text-muted-foreground">
+                Закрытых сделок пока нет — статистики прибыльности нет.
+              </div>
+            )}
+
+            <div className="text-[11px] text-muted-foreground border-t border-border/50 pt-2">
+              Всего проанализировано бумаг: <span className="font-mono">{stats.totalDecisions}</span> ·
+              сегодня сделок: <span className="font-mono">{stats.dailyTradesUsed}</span> ·
+              средняя уверенность ИИ: <span className="font-mono">{stats.avgConfidence.toFixed(0)}%</span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* НЕДАВНИЕ РЕШЕНИЯ */}
+      {stats && stats.recentDecisions.length > 0 && (
+        <Card className="bg-card border-border">
+          <CardHeader className="pb-2 pt-4 px-4">
+            <CardTitle className="text-base">Последние 15 решений</CardTitle>
+            <CardDescription className="text-xs">
+              Что и почему ИИ решил по каждой бумаге
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="px-0 pb-2">
+            <div className="divide-y divide-border/50">
+              {stats.recentDecisions.map(d => {
+                const Icon = d.action === "buy" ? CheckCircle2 : d.action === "sell" ? XCircle : MinusCircle;
+                const color = d.action === "buy" ? "text-green-500" : d.action === "sell" ? "text-red-500" : "text-muted-foreground";
+                const label = d.action === "buy" ? "ПОКУПКА" : d.action === "sell" ? "ПРОДАЖА" : "ДЕРЖАТЬ";
+                return (
+                  <div key={d.id} className="px-4 py-3">
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Icon className={`w-4 h-4 shrink-0 ${color}`} />
+                        <span className="font-mono font-bold text-sm">{d.ticker}</span>
+                        <span className={`text-xs font-medium ${color}`}>{label}</span>
+                        <span className="text-xs text-muted-foreground">{d.confidence}%</span>
+                        {d.executed && (
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-green-600/50 text-green-400">
+                            исполнено
+                          </Badge>
+                        )}
+                        {!d.executed && d.skipReason && (
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-yellow-600/50 text-yellow-400">
+                            пропуск
+                          </Badge>
+                        )}
+                      </div>
+                      <span className="text-[11px] text-muted-foreground font-mono shrink-0">
+                        {format(new Date(d.createdAt), "d MMM HH:mm", { locale: ru })}
+                      </span>
+                    </div>
+                    {d.executed && d.quantity != null && d.price != null && (
+                      <p className="text-xs text-muted-foreground ml-6">
+                        {d.quantity} шт. × ₽{d.price.toFixed(2)} = ₽{(d.quantity * d.price).toFixed(2)}
+                        {d.realizedPnl != null && (
+                          <span className={`ml-2 font-mono ${d.realizedPnl >= 0 ? "text-green-500" : "text-red-500"}`}>
+                            ({d.realizedPnl >= 0 ? "+" : ""}{d.realizedPnl.toFixed(2)} ₽)
+                          </span>
+                        )}
+                      </p>
+                    )}
+                    {d.skipReason && (
+                      <p className="text-xs text-yellow-300/80 ml-6 mt-0.5">
+                        Не сделал, потому что: {d.skipReason}
+                      </p>
+                    )}
+                    {d.reasoning && (
+                      <p className="text-xs text-muted-foreground/80 ml-6 mt-1 line-clamp-2">{d.reasoning}</p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </CardContent>
         </Card>

@@ -266,9 +266,12 @@ ${logContext}
 router.get("/agent/stats", async (_req, res): Promise<void> => {
   const s = await getOrCreateSettings();
   const mode: "paper" | "live" = s.paperMode ? "paper" : "live";
-  const all = await db.select().from(tradeLogsTable).where(eq(tradeLogsTable.mode, mode));
+  const all = await db.select().from(tradeLogsTable).where(eq(tradeLogsTable.mode, mode)).orderBy(desc(tradeLogsTable.createdAt));
   const decisions = all.filter(r => r.action === "buy" || r.action === "sell" || r.action === "hold");
   const trades = all.filter(r => (r.action === "buy" || r.action === "sell") && r.success);
+  const buyCount = decisions.filter(r => r.action === "buy").length;
+  const sellCount = decisions.filter(r => r.action === "sell").length;
+  const holdCount = decisions.filter(r => r.action === "hold").length;
   const closed = trades.filter(r => r.closedAt != null);
   const open = trades.filter(r => r.closedAt == null);
   const wins = closed.filter(r => (r.realizedPnl ?? 0) > 0).length;
@@ -358,6 +361,68 @@ router.get("/agent/stats", async (_req, res): Promise<void> => {
   // Suppress unused warnings
   void isNull; void isNotNull;
 
+  // Cash + per-watchlist affordability
+  let cashRub = 0;
+  const affordability: Array<{ ticker: string; figi: string; lastPrice: number; lot: number; lotPriceRub: number; canAffordLots: number }> = [];
+  if (s.token && s.accountId) {
+    try {
+      const positionsData = await tinkoffPost<{ money?: { currency?: string; units?: string; nano?: number }[]; blocked?: { currency?: string; units?: string; nano?: number }[] }>(
+        "/tinkoff.public.invest.api.contract.v1.OperationsService/GetPositions",
+        { accountId: s.accountId }, s.token, s.isSandbox,
+      );
+      const rub = (positionsData.money ?? []).find(m => (m.currency ?? "").toLowerCase() === "rub");
+      const blk = (positionsData.blocked ?? []).find(b => (b.currency ?? "").toLowerCase() === "rub");
+      cashRub = Math.max(0, parseMoneyValue(rub) - parseMoneyValue(blk));
+    } catch { /* ignore */ }
+
+    try {
+      const wl = await db.select().from(watchlistTable);
+      if (wl.length > 0) {
+        const figis = wl.map(w => w.figi);
+        const [pricesResp, ...lotsResp] = await Promise.all([
+          tinkoffPost<{ lastPrices?: { figi?: string; price?: { units?: string; nano?: number } }[] }>(
+            "/tinkoff.public.invest.api.contract.v1.MarketDataService/GetLastPrices",
+            { figi: figis }, s.token, s.isSandbox,
+          ),
+          ...wl.map(w => tinkoffPost<{ instrument?: { lot?: number } }>(
+            "/tinkoff.public.invest.api.contract.v1.InstrumentsService/GetInstrumentBy",
+            { idType: "INSTRUMENT_ID_TYPE_FIGI", id: w.figi }, s.token!, s.isSandbox,
+          ).catch(() => ({ instrument: { lot: 1 } }))),
+        ]);
+        const priceMap = new Map<string, number>();
+        for (const p of pricesResp.lastPrices ?? []) if (p.figi) priceMap.set(p.figi, parseQuotation(p.price));
+        wl.forEach((w, i) => {
+          const lastPrice = priceMap.get(w.figi) ?? 0;
+          const lot = lotsResp[i]?.instrument?.lot ?? 1;
+          const lotPriceRub = lastPrice * lot;
+          const budget = Math.min(s.maxOrderAmount ?? cashRub, cashRub);
+          const canAffordLots = lotPriceRub > 0 ? Math.floor(budget / lotPriceRub) : 0;
+          affordability.push({ ticker: w.ticker, figi: w.figi, lastPrice, lot, lotPriceRub, canAffordLots });
+        });
+      }
+    } catch { /* ignore */ }
+  }
+
+  // Recent decisions (last 15) with parsed skipReason
+  const recentDecisions = all.slice(0, 15).map(r => {
+    const reasoning = r.aiReasoning ?? "";
+    const skipMatch = reasoning.match(/⛔\s*(.+?)(?:\n|$)/);
+    const wasExecuted = (r.action === "buy" || r.action === "sell") && (r.success ?? false) && !skipMatch;
+    return {
+      id: r.id,
+      ticker: r.ticker,
+      action: r.action,
+      confidence: r.confidence ?? 0,
+      executed: wasExecuted,
+      skipReason: skipMatch ? skipMatch[1].trim() : null,
+      reasoning: reasoning.replace(/⛔.+$/s, "").trim().slice(0, 400),
+      quantity: r.quantity,
+      price: r.price,
+      realizedPnl: r.realizedPnl,
+      createdAt: r.createdAt.toISOString(),
+    };
+  });
+
   res.json({
     mode,
     totalDecisions: decisions.length,
@@ -372,6 +437,12 @@ router.get("/agent/stats", async (_req, res): Promise<void> => {
     vsBuyAndHold: { agentReturnPct, buyHoldReturnPct },
     dailyLossUsedRub,
     dailyTradesUsed,
+    cashRub,
+    affordability,
+    recentDecisions,
+    buyCount,
+    sellCount,
+    holdCount,
   });
 });
 

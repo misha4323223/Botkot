@@ -312,6 +312,35 @@ export const GetAgentStatsResponse = zod.object({
   }),
   dailyLossUsedRub: zod.number(),
   dailyTradesUsed: zod.number(),
+  cashRub: zod.number(),
+  affordability: zod.array(
+    zod.object({
+      ticker: zod.string(),
+      figi: zod.string(),
+      lastPrice: zod.number(),
+      lot: zod.number(),
+      lotPriceRub: zod.number(),
+      canAffordLots: zod.number(),
+    }),
+  ),
+  recentDecisions: zod.array(
+    zod.object({
+      id: zod.number(),
+      ticker: zod.string(),
+      action: zod.string(),
+      confidence: zod.number(),
+      executed: zod.boolean(),
+      skipReason: zod.string().nullish(),
+      reasoning: zod.string(),
+      quantity: zod.number().nullish(),
+      price: zod.number().nullish(),
+      realizedPnl: zod.number().nullish(),
+      createdAt: zod.string(),
+    }),
+  ),
+  buyCount: zod.number(),
+  sellCount: zod.number(),
+  holdCount: zod.number(),
 });
 
 /**

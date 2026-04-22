@@ -566,6 +566,60 @@ components:
           type: number
         dailyTradesUsed:
           type: integer
+        cashRub:
+          type: number
+        affordability:
+          type: array
+          items:
+            type: object
+            properties:
+              ticker:
+                type: string
+              figi:
+                type: string
+              lastPrice:
+                type: number
+              lot:
+                type: integer
+              lotPriceRub:
+                type: number
+              canAffordLots:
+                type: integer
+            required: [ticker, figi, lastPrice, lot, lotPriceRub, canAffordLots]
+        recentDecisions:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: integer
+              ticker:
+                type: string
+              action:
+                type: string
+              confidence:
+                type: number
+              executed:
+                type: boolean
+              skipReason:
+                type: ["string", "null"]
+              reasoning:
+                type: string
+              quantity:
+                type: ["number", "null"]
+              price:
+                type: ["number", "null"]
+              realizedPnl:
+                type: ["number", "null"]
+              createdAt:
+                type: string
+            required: [id, ticker, action, confidence, executed, reasoning, createdAt]
+        buyCount:
+          type: integer
+        sellCount:
+          type: integer
+        holdCount:
+          type: integer
       required:
         - mode
         - totalDecisions
@@ -580,6 +634,12 @@ components:
         - vsBuyAndHold
         - dailyLossUsedRub
         - dailyTradesUsed
+        - cashRub
+        - affordability
+        - recentDecisions
+        - buyCount
+        - sellCount
+        - holdCount
 
     Account:
       type: object
