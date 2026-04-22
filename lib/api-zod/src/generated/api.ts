@@ -344,6 +344,32 @@ export const GetAgentStatsResponse = zod.object({
 });
 
 /**
+ * @summary Curated MOEX tickers + AI-picked suggestions for the user's budget
+ */
+export const GetSuggestedTickersResponse = zod.object({
+  cashRub: zod.number(),
+  tickers: zod.array(
+    zod.object({
+      ticker: zod.string(),
+      name: zod.string(),
+      sector: zod.string(),
+      figi: zod.string(),
+      lot: zod.number(),
+      lastPrice: zod.number(),
+      lotPriceRub: zod.number(),
+      canAfford: zod.boolean(),
+      inWatchlist: zod.boolean(),
+    }),
+  ),
+  aiPicks: zod.array(
+    zod.object({
+      ticker: zod.string(),
+      reason: zod.string(),
+    }),
+  ),
+});
+
+/**
  * @summary Get instruments the agent is watching
  */
 export const GetWatchlistResponseItem = zod.object({

@@ -8,8 +8,10 @@ import {
   useAddToWatchlist,
   useSearchInstruments,
   useGetAgentStats,
+  useGetSuggestedTickers,
   getGetAgentStatusQueryKey,
-  getGetWatchlistQueryKey
+  getGetWatchlistQueryKey,
+  getGetSuggestedTickersQueryKey
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -19,7 +21,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { Bot, Play, Square, Trash2, TerminalSquare, Search, Plus, Check, ShieldAlert, Wallet, AlertTriangle, CheckCircle2, XCircle, MinusCircle } from "lucide-react";
+import { Bot, Play, Square, Trash2, TerminalSquare, Search, Plus, Check, ShieldAlert, Wallet, AlertTriangle, CheckCircle2, XCircle, MinusCircle, Sparkles, RefreshCw } from "lucide-react";
 import { format } from "date-fns";
 import { ru } from "date-fns/locale";
 
@@ -36,6 +38,7 @@ export default function AgentPage() {
   const { data: status, isLoading: isStatusLoading } = useGetAgentStatus();
   const { data: watchlist, isLoading: isWatchlistLoading } = useGetWatchlist();
   const { data: stats } = useGetAgentStats({ query: { refetchInterval: 30000 } });
+  const { data: suggested, isLoading: isLoadingSuggest, refetch: refetchSuggest, isFetching: isFetchingSuggest } = useGetSuggestedTickers();
 
   const startAgent = useStartAgent({
     mutation: { onSuccess: () => queryClient.invalidateQueries({ queryKey: getGetAgentStatusQueryKey() }) }
@@ -50,6 +53,7 @@ export default function AgentPage() {
     mutation: {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getGetWatchlistQueryKey() });
+        queryClient.invalidateQueries({ queryKey: getGetSuggestedTickersQueryKey() });
         setSearchQuery("");
         setDebouncedQuery("");
       }
@@ -191,6 +195,105 @@ export default function AgentPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* ПОДСКАЗКИ ИИ ПО ТИКЕРАМ */}
+      <Card className="bg-card border-border">
+        <CardHeader className="pb-2 pt-4 px-4 flex flex-row items-start justify-between gap-3">
+          <div className="min-w-0">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-primary" /> Что добавить в анализ
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Популярные акции МосБиржи с подсказкой ИИ — нажмите «+», чтобы добавить
+            </CardDescription>
+          </div>
+          <Button variant="outline" size="sm" className="h-7 text-xs px-2 shrink-0" onClick={() => refetchSuggest()} disabled={isFetchingSuggest}>
+            <RefreshCw className={`w-3.5 h-3.5 mr-1 ${isFetchingSuggest ? "animate-spin" : ""}`} /> Обновить
+          </Button>
+        </CardHeader>
+        <CardContent className="px-4 pb-4 space-y-4">
+          {isLoadingSuggest ? (
+            <Skeleton className="h-32 w-full" />
+          ) : !suggested ? (
+            <p className="text-sm text-muted-foreground">Не удалось получить список. Проверьте, что токен Tinkoff подключён.</p>
+          ) : (
+            <>
+              {/* AI picks */}
+              {suggested.aiPicks.length > 0 && (
+                <div className="rounded-md border border-primary/40 bg-primary/5 p-3 space-y-2">
+                  <p className="text-xs font-medium text-primary flex items-center gap-1">
+                    <Sparkles className="w-3.5 h-3.5" /> ИИ рекомендует начать с этих:
+                  </p>
+                  {suggested.aiPicks.map(p => {
+                    const t = suggested.tickers.find(x => x.ticker === p.ticker);
+                    return (
+                      <div key={p.ticker} className="flex items-start gap-2 text-sm">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 px-2 text-xs shrink-0"
+                          disabled={!t || t.inWatchlist || addToWatchlist.isPending}
+                          onClick={() => t && addToWatchlist.mutate({ data: { figi: t.figi, ticker: t.ticker, name: t.name } })}
+                        >
+                          {t?.inWatchlist ? <Check className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+                        </Button>
+                        <div className="min-w-0">
+                          <div className="flex items-baseline gap-2 flex-wrap">
+                            <span className="font-mono font-bold text-sm">{p.ticker}</span>
+                            {t && (
+                              <span className="text-[11px] text-muted-foreground">
+                                ₽{t.lotPriceRub.toFixed(0)}/лот · {t.canAfford ? <span className="text-green-500">хватает</span> : <span className="text-yellow-400">не хватает</span>}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground/90 mt-0.5">{p.reason}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* All popular tickers */}
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-2">Все популярные ({suggested.tickers.length}):</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                  {suggested.tickers.map(t => (
+                    <div
+                      key={t.figi}
+                      className={`flex items-center justify-between gap-2 rounded-md border p-2 ${
+                        t.inWatchlist ? "border-border/30 bg-muted/10 opacity-60" :
+                        t.canAfford ? "border-green-700/30 bg-green-950/10" :
+                        "border-border bg-muted/5"
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-baseline gap-2">
+                          <span className="font-mono font-bold text-sm">{t.ticker}</span>
+                          <span className="text-[10px] text-muted-foreground uppercase">{t.sector}</span>
+                        </div>
+                        <div className="text-[11px] text-muted-foreground truncate">
+                          1 лот ({t.lot} шт.) = ₽{t.lotPriceRub.toFixed(0)}
+                          {!t.canAfford && t.lotPriceRub > 0 && <span className="text-yellow-400/80 ml-1">не хватает</span>}
+                        </div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 shrink-0"
+                        disabled={t.inWatchlist || addToWatchlist.isPending}
+                        onClick={() => addToWatchlist.mutate({ data: { figi: t.figi, ticker: t.ticker, name: t.name } })}
+                      >
+                        {t.inWatchlist ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Plus className="w-3.5 h-3.5 text-primary" />}
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       {/* ЧТО СДЕЛАЛ ИИ — простая сводка */}
       {stats && (

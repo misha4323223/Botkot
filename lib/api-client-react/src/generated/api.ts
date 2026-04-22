@@ -35,6 +35,7 @@ import type {
   PortfolioSummary,
   SearchInstrumentsParams,
   Settings,
+  SuggestedTickers,
   TradeLogEntry,
   TradeStats,
   UpdateSettingsBody,
@@ -1605,6 +1606,81 @@ export function useGetAgentStats<
   request?: SecondParameter<typeof customFetch>;
 }): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetAgentStatsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Curated MOEX tickers + AI-picked suggestions for the user's budget
+ */
+export const getGetSuggestedTickersUrl = () => {
+  return `/api/agent/suggest-tickers`;
+};
+
+export const getSuggestedTickers = async (
+  options?: RequestInit,
+): Promise<SuggestedTickers> => {
+  return customFetch<SuggestedTickers>(getGetSuggestedTickersUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetSuggestedTickersQueryKey = () => {
+  return [`/api/agent/suggest-tickers`] as const;
+};
+
+export const getGetSuggestedTickersQueryOptions = <
+  TData = Awaited<ReturnType<typeof getSuggestedTickers>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getSuggestedTickers>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetSuggestedTickersQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getSuggestedTickers>>
+  > = ({ signal }) => getSuggestedTickers({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getSuggestedTickers>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetSuggestedTickersQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getSuggestedTickers>>
+>;
+export type GetSuggestedTickersQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Curated MOEX tickers + AI-picked suggestions for the user's budget
+ */
+
+export function useGetSuggestedTickers<
+  TData = Awaited<ReturnType<typeof getSuggestedTickers>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getSuggestedTickers>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetSuggestedTickersQueryOptions(options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

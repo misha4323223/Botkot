@@ -127,6 +127,29 @@ export interface AgentStats {
   holdCount: number;
 }
 
+export type SuggestedTickersTickersItem = {
+  ticker: string;
+  name: string;
+  sector: string;
+  figi: string;
+  lot: number;
+  lastPrice: number;
+  lotPriceRub: number;
+  canAfford: boolean;
+  inWatchlist: boolean;
+};
+
+export type SuggestedTickersAiPicksItem = {
+  ticker: string;
+  reason: string;
+};
+
+export interface SuggestedTickers {
+  cashRub: number;
+  tickers: SuggestedTickersTickersItem[];
+  aiPicks: SuggestedTickersAiPicksItem[];
+}
+
 export interface Account {
   id: string;
   name: string;

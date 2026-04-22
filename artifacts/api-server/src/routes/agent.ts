@@ -446,6 +446,154 @@ router.get("/agent/stats", async (_req, res): Promise<void> => {
   });
 });
 
+// Curated list of liquid MOEX stocks
+const POPULAR_TICKERS: Array<{ ticker: string; name: string; sector: string }> = [
+  { ticker: "SBER", name: "Сбербанк", sector: "Банки" },
+  { ticker: "VTBR", name: "ВТБ", sector: "Банки" },
+  { ticker: "TCSG", name: "ТКС Холдинг", sector: "Банки" },
+  { ticker: "GAZP", name: "Газпром", sector: "Нефть и газ" },
+  { ticker: "LKOH", name: "Лукойл", sector: "Нефть и газ" },
+  { ticker: "ROSN", name: "Роснефть", sector: "Нефть и газ" },
+  { ticker: "NVTK", name: "Новатэк", sector: "Нефть и газ" },
+  { ticker: "TATN", name: "Татнефть", sector: "Нефть и газ" },
+  { ticker: "GMKN", name: "Норникель", sector: "Металлы" },
+  { ticker: "CHMF", name: "Северсталь", sector: "Металлы" },
+  { ticker: "NLMK", name: "НЛМК", sector: "Металлы" },
+  { ticker: "PLZL", name: "Полюс", sector: "Золото" },
+  { ticker: "MAGN", name: "ММК", sector: "Металлы" },
+  { ticker: "MGNT", name: "Магнит", sector: "Ритейл" },
+  { ticker: "YDEX", name: "Яндекс", sector: "IT" },
+  { ticker: "OZON", name: "Ozon", sector: "Ритейл" },
+  { ticker: "MTSS", name: "МТС", sector: "Телеком" },
+  { ticker: "RTKM", name: "Ростелеком", sector: "Телеком" },
+  { ticker: "AFLT", name: "Аэрофлот", sector: "Транспорт" },
+  { ticker: "PHOR", name: "ФосАгро", sector: "Удобрения" },
+  { ticker: "AFKS", name: "АФК Система", sector: "Холдинг" },
+  { ticker: "ALRS", name: "Алроса", sector: "Алмазы" },
+];
+
+interface ResolvedInstrument { ticker: string; name: string; sector: string; figi: string; lot: number; lastPrice: number; lotPriceRub: number; canAfford: boolean }
+const figiCache = new Map<string, { figi: string; lot: number; name: string }>();
+
+async function resolvePopular(token: string, isSandbox: boolean): Promise<ResolvedInstrument[]> {
+  const resolved: ResolvedInstrument[] = [];
+  const toFetch: typeof POPULAR_TICKERS = [];
+  for (const t of POPULAR_TICKERS) {
+    if (figiCache.has(t.ticker)) continue;
+    toFetch.push(t);
+  }
+
+  await Promise.all(toFetch.map(async t => {
+    try {
+      const data = await tinkoffPost<{ instruments?: { figi?: string; ticker?: string; name?: string; lot?: number; classCode?: string; instrumentType?: string }[] }>(
+        "/tinkoff.public.invest.api.contract.v1.InstrumentsService/FindInstrument",
+        { query: t.ticker, instrumentKind: "INSTRUMENT_TYPE_SHARE", apiTradeAvailableFlag: true },
+        token, isSandbox,
+      );
+      const match = (data.instruments ?? []).find(i => (i.ticker ?? "").toUpperCase() === t.ticker && (i.classCode ?? "").startsWith("TQ"))
+        ?? (data.instruments ?? []).find(i => (i.ticker ?? "").toUpperCase() === t.ticker)
+        ?? data.instruments?.[0];
+      if (match?.figi) figiCache.set(t.ticker, { figi: match.figi, lot: match.lot ?? 1, name: match.name ?? t.name });
+    } catch { /* skip */ }
+  }));
+
+  const allFigis = POPULAR_TICKERS.map(t => figiCache.get(t.ticker)?.figi).filter((f): f is string => !!f);
+  let priceMap = new Map<string, number>();
+  if (allFigis.length > 0) {
+    try {
+      const lp = await tinkoffPost<{ lastPrices?: { figi?: string; price?: { units?: string; nano?: number } }[] }>(
+        "/tinkoff.public.invest.api.contract.v1.MarketDataService/GetLastPrices",
+        { figi: allFigis }, token, isSandbox,
+      );
+      for (const p of lp.lastPrices ?? []) if (p.figi) priceMap.set(p.figi, parseQuotation(p.price));
+    } catch { /* ignore */ }
+  }
+
+  for (const t of POPULAR_TICKERS) {
+    const cached = figiCache.get(t.ticker);
+    if (!cached) continue;
+    const lastPrice = priceMap.get(cached.figi) ?? 0;
+    const lotPriceRub = lastPrice * cached.lot;
+    resolved.push({
+      ticker: t.ticker, name: t.name, sector: t.sector,
+      figi: cached.figi, lot: cached.lot,
+      lastPrice, lotPriceRub, canAfford: false,
+    });
+  }
+  return resolved;
+}
+
+router.get("/agent/suggest-tickers", async (_req, res): Promise<void> => {
+  const s = await getOrCreateSettings();
+  if (!s.token) { res.json({ cashRub: 0, tickers: [], aiPicks: [] }); return; }
+
+  // Get cash
+  let cashRub = 0;
+  if (s.accountId) {
+    try {
+      const positionsData = await tinkoffPost<{ money?: { currency?: string; units?: string; nano?: number }[]; blocked?: { currency?: string; units?: string; nano?: number }[] }>(
+        "/tinkoff.public.invest.api.contract.v1.OperationsService/GetPositions",
+        { accountId: s.accountId }, s.token, s.isSandbox,
+      );
+      const rub = (positionsData.money ?? []).find(m => (m.currency ?? "").toLowerCase() === "rub");
+      const blk = (positionsData.blocked ?? []).find(b => (b.currency ?? "").toLowerCase() === "rub");
+      cashRub = Math.max(0, parseMoneyValue(rub) - parseMoneyValue(blk));
+    } catch { /* ignore */ }
+  }
+
+  const tickers = await resolvePopular(s.token, s.isSandbox ?? false);
+  const budget = Math.min(s.maxOrderAmount ?? cashRub, cashRub);
+  for (const t of tickers) t.canAfford = t.lotPriceRub > 0 && t.lotPriceRub <= budget;
+
+  // Sort: affordable first, then by lotPrice ascending
+  tickers.sort((a, b) => {
+    if (a.canAfford !== b.canAfford) return a.canAfford ? -1 : 1;
+    return a.lotPriceRub - b.lotPriceRub;
+  });
+
+  // Already in watchlist
+  const wl = await db.select().from(watchlistTable);
+  const inListFigis = new Set(wl.map(w => w.figi));
+
+  // Ask Claude for picks
+  let aiPicks: Array<{ ticker: string; reason: string }> = [];
+  try {
+    const candidates = tickers.filter(t => !inListFigis.has(t.figi)).slice(0, 15);
+    const prompt = `У пользователя свободно ${cashRub.toFixed(2)} ₽ на счёте МосБиржи.
+Уже в списке наблюдения: ${wl.map(w => w.ticker).join(", ") || "ничего"}.
+Доступные акции (тикер, сектор, цена 1 лота):
+${candidates.map(c => `${c.ticker} (${c.sector}) — ₽${c.lotPriceRub.toFixed(0)} за лот ${c.canAfford ? "✓ хватит" : "✗ не хватит"}`).join("\n")}
+
+Подскажи 3-5 акций для добавления в список наблюдения. Учитывай:
+- Бюджет (лучше те, на которые хватает хотя бы на 1 лот)
+- Диверсификация по секторам
+- Ликвидность и популярность
+Ответь ТОЛЬКО JSON-массивом без markdown:
+[{"ticker":"SBER","reason":"кратко почему стоит следить, 1-2 предложения"}, ...]`;
+
+    const resp = await anthropic.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 1024,
+      messages: [{ role: "user", content: prompt }],
+    });
+    const text = resp.content.filter(b => b.type === "text").map(b => (b as { text?: string }).text ?? "").join("").trim().replace(/^```json\s*|\s*```$/g, "");
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) {
+      aiPicks = parsed
+        .filter((p): p is { ticker: string; reason: string } => p && typeof p.ticker === "string" && typeof p.reason === "string")
+        .slice(0, 5);
+    }
+  } catch (err) {
+    logger.warn({ err }, "Claude ticker suggest failed");
+  }
+
+  res.json({
+    cashRub,
+    tickers: tickers.map(t => ({ ...t, inWatchlist: inListFigis.has(t.figi) })),
+    aiPicks,
+  });
+});
+
 router.get("/agent/watchlist", async (_req, res): Promise<void> => {
   const items = await db.select().from(watchlistTable).orderBy(desc(watchlistTable.addedAt));
   res.json(items.map((i) => ({ id: i.id, figi: i.figi, ticker: i.ticker, name: i.name, addedAt: i.addedAt.toISOString() })));

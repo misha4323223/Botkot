@@ -379,6 +379,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/AgentStats"
 
+  /agent/suggest-tickers:
+    get:
+      operationId: getSuggestedTickers
+      tags: [agent]
+      summary: Curated MOEX tickers + AI-picked suggestions for the user's budget
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuggestedTickers"
+
   /agent/watchlist:
     get:
       operationId: getWatchlist
@@ -640,6 +653,36 @@ components:
         - buyCount
         - sellCount
         - holdCount
+
+    SuggestedTickers:
+      type: object
+      properties:
+        cashRub:
+          type: number
+        tickers:
+          type: array
+          items:
+            type: object
+            properties:
+              ticker: { type: string }
+              name: { type: string }
+              sector: { type: string }
+              figi: { type: string }
+              lot: { type: integer }
+              lastPrice: { type: number }
+              lotPriceRub: { type: number }
+              canAfford: { type: boolean }
+              inWatchlist: { type: boolean }
+            required: [ticker, name, sector, figi, lot, lastPrice, lotPriceRub, canAfford, inWatchlist]
+        aiPicks:
+          type: array
+          items:
+            type: object
+            properties:
+              ticker: { type: string }
+              reason: { type: string }
+            required: [ticker, reason]
+      required: [cashRub, tickers, aiPicks]
 
     Account:
       type: object
