@@ -124,8 +124,11 @@ keep an `index.ts`.
 
 See the `pnpm-workspace` skill for workspace structure and package details.
 
-## In progress
+## Recently shipped
 
-- UI panels on the agent page for the new endpoints `GET /agent/per-ticker-stats`,
-  `GET /agent/equity-curve`, and `DELETE /agent/paper/reset` (endpoints + OpenAPI ready;
-  React components pending).
+- UI panels on the agent page wired to `GET /agent/per-ticker-stats`,
+  `GET /agent/equity-curve`, and `DELETE /agent/paper/reset`:
+  - "Как растёт прибыль ИИ" — equity curve line chart (recharts), refetched every 30s
+  - "Эффективность по бумагам" — per-ticker P&L cards with win rate, open lots, avg confidence
+  - "Сбросить бумажную симуляцию" — destructive button shown only in paper mode with at
+    least one decision; invalidates stats + per-ticker + equity-curve queries on success
