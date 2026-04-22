@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { db, settingsTable } from "@workspace/db";
 import { UpdateSettingsBody } from "@workspace/api-zod";
 import { encryptString, decryptString } from "../lib/crypto";
+import { tinkoffPost } from "../lib/tinkoff";
 
 const router: IRouter = Router();
 
@@ -60,6 +61,21 @@ router.put("/settings", async (req, res): Promise<void> => {
   if (d.dailyLossLimitRub != null) update.dailyLossLimitRub = d.dailyLossLimitRub;
   if (d.maxTradesPerDay != null) update.maxTradesPerDay = d.maxTradesPerDay;
   if (d.priceLimitPercent != null) update.priceLimitPercent = d.priceLimitPercent;
+
+  // Auto-detect accountId if token provided but accountId not set/blank
+  if (d.token && (d.accountId == null || d.accountId === "")) {
+    try {
+      const isSandbox = d.isSandbox ?? false;
+      const acc = await tinkoffPost<{ accounts?: { id: string; status?: string }[] }>(
+        "/tinkoff.public.invest.api.contract.v1.UsersService/GetAccounts",
+        {}, d.token, isSandbox
+      );
+      const open = (acc.accounts ?? []).find(a => a.status === "ACCOUNT_STATUS_OPEN") ?? acc.accounts?.[0];
+      if (open?.id) update.accountId = open.id;
+    } catch (e) {
+      req.log.warn({ err: e }, "Auto-detect accountId failed");
+    }
+  }
 
   await db.update(settingsTable).set(update);
   const fresh = await getOrCreateSettings();
