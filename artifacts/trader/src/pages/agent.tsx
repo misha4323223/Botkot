@@ -111,7 +111,7 @@ export default function AgentPage() {
       {/* Header */}
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-2xl lg:text-3xl font-bold tracking-tight truncate">AI Agent</h1>
+          <h1 className="text-2xl lg:text-3xl font-bold tracking-tight truncate">ИИ-агент</h1>
           <p className="text-muted-foreground text-sm mt-0.5 hidden sm:block">Автономная торговля и список наблюдения</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -148,11 +148,11 @@ export default function AgentPage() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
               <Stat label="Решений" value={stats.totalDecisions} />
               <Stat label="Сделок (откр./закр.)" value={`${stats.openPositions} / ${stats.closedPositions}`} />
-              <Stat label="Win-rate" value={`${stats.winRate.toFixed(1)}%`} tone={stats.winRate >= 55 ? "good" : stats.closedPositions === 0 ? "neutral" : "bad"} />
-              <Stat label="Realized P&L" value={`${stats.realizedPnl >= 0 ? "+" : ""}${stats.realizedPnl.toFixed(2)}₽`} tone={stats.realizedPnl >= 0 ? "good" : "bad"} />
-              <Stat label="Unrealized P&L" value={`${stats.unrealizedPnl >= 0 ? "+" : ""}${stats.unrealizedPnl.toFixed(2)}₽`} tone={stats.unrealizedPnl >= 0 ? "good" : "bad"} />
-              <Stat label="Avg confidence" value={`${stats.avgConfidence.toFixed(0)}%`} />
-              <Stat label="Vs buy-and-hold" value={`${stats.vsBuyAndHold.agentReturnPct.toFixed(1)}% / ${stats.vsBuyAndHold.buyHoldReturnPct.toFixed(1)}%`} tone={stats.vsBuyAndHold.agentReturnPct >= stats.vsBuyAndHold.buyHoldReturnPct ? "good" : "bad"} />
+              <Stat label="Доля прибыльных" value={`${stats.winRate.toFixed(1)}%`} tone={stats.winRate >= 55 ? "good" : stats.closedPositions === 0 ? "neutral" : "bad"} />
+              <Stat label="Закрытый P&L" value={`${stats.realizedPnl >= 0 ? "+" : ""}${stats.realizedPnl.toFixed(2)}₽`} tone={stats.realizedPnl >= 0 ? "good" : "bad"} />
+              <Stat label="Открытый P&L" value={`${stats.unrealizedPnl >= 0 ? "+" : ""}${stats.unrealizedPnl.toFixed(2)}₽`} tone={stats.unrealizedPnl >= 0 ? "good" : "bad"} />
+              <Stat label="Ср. уверенность" value={`${stats.avgConfidence.toFixed(0)}%`} />
+              <Stat label="Агент / купи-и-держи" value={`${stats.vsBuyAndHold.agentReturnPct.toFixed(1)}% / ${stats.vsBuyAndHold.buyHoldReturnPct.toFixed(1)}%`} tone={stats.vsBuyAndHold.agentReturnPct >= stats.vsBuyAndHold.buyHoldReturnPct ? "good" : "bad"} />
               <Stat label="Сегодня: сделок / убыток" value={`${stats.dailyTradesUsed} / ${stats.dailyLossUsedRub.toFixed(0)}₽`} />
             </div>
             <div>
@@ -276,7 +276,7 @@ export default function AgentPage() {
           <CardHeader className="border-b border-border/50 pb-3 pt-4 px-4 flex flex-row items-center justify-between gap-3">
             <div className="flex items-center text-primary shrink-0">
               <TerminalSquare className="w-4 h-4 mr-2" />
-              <CardTitle className="text-xs font-mono tracking-widest uppercase">Live Thought Stream</CardTitle>
+              <CardTitle className="text-xs font-mono tracking-widest uppercase">Поток мыслей ИИ</CardTitle>
             </div>
             <div className="flex items-center gap-2">
               {isStreaming && <div className="h-2 w-2 rounded-full bg-primary animate-pulse shrink-0" />}

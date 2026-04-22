@@ -11,12 +11,12 @@ import {
 import { cn } from "@/lib/utils";
 
 const navigation = [
-  { name: "Dashboard", href: "/", icon: LayoutDashboard },
-  { name: "Portfolio", href: "/portfolio", icon: Briefcase },
-  { name: "Market", href: "/market", icon: LineChart },
-  { name: "Agent", href: "/agent", icon: Bot },
-  { name: "Orders", href: "/orders", icon: ListOrdered },
-  { name: "Settings", href: "/settings", icon: Settings },
+  { name: "Главная", href: "/", icon: LayoutDashboard },
+  { name: "Портфель", href: "/portfolio", icon: Briefcase },
+  { name: "Рынок", href: "/market", icon: LineChart },
+  { name: "Агент", href: "/agent", icon: Bot },
+  { name: "Ордера", href: "/orders", icon: ListOrdered },
+  { name: "Настройки", href: "/settings", icon: Settings },
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -28,7 +28,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <div className="hidden lg:flex w-64 border-r border-border bg-card flex-col shrink-0">
         <div className="h-16 flex items-center px-6 border-b border-border">
           <Activity className="w-6 h-6 text-primary mr-2" />
-          <span className="font-bold text-lg tracking-tight text-card-foreground">AI Trader</span>
+          <span className="font-bold text-lg tracking-tight text-card-foreground">AI Трейдер</span>
         </div>
         
         <div className="flex-1 overflow-y-auto py-4">
@@ -67,7 +67,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             </div>
             <div className="ml-3">
               <p className="text-sm font-medium text-card-foreground">Tinkoff Live</p>
-              <p className="text-xs text-green-500">Connected</p>
+              <p className="text-xs text-green-500">Подключено</p>
             </div>
           </div>
         </div>
@@ -78,7 +78,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         {/* Mobile top bar */}
         <div className="lg:hidden flex items-center h-14 px-4 border-b border-border bg-card shrink-0">
           <Activity className="w-5 h-5 text-primary mr-2" />
-          <span className="font-bold text-base tracking-tight text-card-foreground">AI Trader</span>
+          <span className="font-bold text-base tracking-tight text-card-foreground">AI Трейдер</span>
         </div>
 
         {/* Page content */}

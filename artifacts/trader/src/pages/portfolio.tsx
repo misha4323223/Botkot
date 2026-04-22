@@ -27,15 +27,15 @@ export default function PortfolioPage() {
   return (
     <div className="space-y-6 max-w-7xl mx-auto h-full flex flex-col">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold tracking-tight">Portfolio</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Портфель</h1>
         
         <div className="flex items-center space-x-4">
           <Select value={selectedAccount} onValueChange={setSelectedAccount}>
             <SelectTrigger className="w-[250px] bg-card border-card-border">
-              <SelectValue placeholder="Select Account" />
+              <SelectValue placeholder="Выберите счёт" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Accounts</SelectItem>
+              <SelectItem value="all">Все счета</SelectItem>
               {accounts?.map((acc) => (
                 <SelectItem key={acc.id} value={acc.id}>
                   {acc.name} ({acc.id.slice(-4)})
@@ -48,13 +48,13 @@ export default function PortfolioPage() {
 
       <Card className="bg-card border-card-border p-6 flex items-center justify-between">
         <div>
-          <p className="text-sm font-medium text-muted-foreground mb-1">Total Value</p>
+          <p className="text-sm font-medium text-muted-foreground mb-1">Стоимость портфеля</p>
           {summary ? (
             <p className="text-3xl font-bold font-mono">₽{summary.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
           ) : <Skeleton className="h-8 w-32" />}
         </div>
         <div>
-          <p className="text-sm font-medium text-muted-foreground mb-1">Total P&L</p>
+          <p className="text-sm font-medium text-muted-foreground mb-1">Общий P&L</p>
           {summary ? (
             <p className={`text-2xl font-bold font-mono ${summary.totalPnl >= 0 ? "text-success" : "text-destructive"}`}>
               {summary.totalPnl >= 0 ? "+" : ""}₽{summary.totalPnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -63,7 +63,7 @@ export default function PortfolioPage() {
           ) : <Skeleton className="h-8 w-32" />}
         </div>
         <div>
-          <p className="text-sm font-medium text-muted-foreground mb-1">Cash Balance</p>
+          <p className="text-sm font-medium text-muted-foreground mb-1">Свободные средства</p>
           {summary ? (
             <p className="text-2xl font-bold font-mono">₽{summary.cashRub.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
           ) : <Skeleton className="h-8 w-32" />}
@@ -134,12 +134,12 @@ export default function PortfolioPage() {
           <table className="w-full text-sm text-left">
             <thead className="text-xs uppercase text-muted-foreground bg-muted/50 border-b border-border sticky top-0">
               <tr>
-                <th className="px-6 py-4 font-medium">Asset</th>
-                <th className="px-6 py-4 font-medium">Type</th>
-                <th className="px-6 py-4 font-medium text-right">Quantity</th>
-                <th className="px-6 py-4 font-medium text-right">Avg Price</th>
-                <th className="px-6 py-4 font-medium text-right">Current Price</th>
-                <th className="px-6 py-4 font-medium text-right">Value</th>
+                <th className="px-6 py-4 font-medium">Бумага</th>
+                <th className="px-6 py-4 font-medium">Тип</th>
+                <th className="px-6 py-4 font-medium text-right">Количество</th>
+                <th className="px-6 py-4 font-medium text-right">Ср. цена</th>
+                <th className="px-6 py-4 font-medium text-right">Текущая</th>
+                <th className="px-6 py-4 font-medium text-right">Стоимость</th>
                 <th className="px-6 py-4 font-medium text-right">P&L</th>
               </tr>
             </thead>
@@ -153,7 +153,7 @@ export default function PortfolioPage() {
               ) : portfolio?.positions.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-6 py-12 text-center text-muted-foreground">
-                    No positions found in this account.
+                    На этом счёте нет позиций.
                   </td>
                 </tr>
               ) : (

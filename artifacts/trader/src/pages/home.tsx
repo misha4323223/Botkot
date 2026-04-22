@@ -14,12 +14,12 @@ export default function Home() {
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Главная</h1>
         {agentStatus && (
           <Badge variant={agentStatus.isRunning ? "default" : "secondary"} className={agentStatus.isRunning ? "bg-success text-success-foreground" : ""}>
             {agentStatus.isRunning ? (
-              <><ActivityIcon className="w-3 h-3 mr-1 animate-pulse" /> Agent Active</>
-            ) : "Agent Paused"}
+              <><ActivityIcon className="w-3 h-3 mr-1 animate-pulse" /> Агент активен</>
+            ) : "Агент на паузе"}
           </Badge>
         )}
       </div>
@@ -80,7 +80,7 @@ export default function Home() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="bg-card border-card-border">
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Total Value</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Стоимость портфеля</CardTitle>
             <DollarSign className="w-4 h-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -90,7 +90,7 @@ export default function Home() {
                   ₽{summary?.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
                 <div className="text-xs text-muted-foreground mt-1">
-                  Cash: ₽{summary?.cashRub.toLocaleString()}
+                  Свободно: ₽{summary?.cashRub.toLocaleString()}
                 </div>
               </>
             )}
@@ -99,7 +99,7 @@ export default function Home() {
 
         <Card className="bg-card border-card-border">
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Total P&L</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Общий P&L</CardTitle>
             <Wallet className="w-4 h-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -111,7 +111,7 @@ export default function Home() {
                 </div>
                 <div className={`text-xs mt-1 ${summary && summary.totalPnlPercent >= 0 ? "text-success" : "text-destructive"}`}>
                   {summary && summary.totalPnlPercent >= 0 ? <TrendingUp className="w-3 h-3 inline mr-1" /> : <TrendingDown className="w-3 h-3 inline mr-1" />}
-                  {summary?.totalPnlPercent.toFixed(2)}% all time
+                  {summary?.totalPnlPercent.toFixed(2)}% за всё время
                 </div>
               </>
             )}
@@ -120,7 +120,7 @@ export default function Home() {
 
         <Card className="bg-card border-card-border">
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Daily P&L</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">P&L за день</CardTitle>
             <Activity className="w-4 h-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -132,7 +132,7 @@ export default function Home() {
                 </div>
                 <div className={`text-xs mt-1 ${summary && summary.dailyPnlPercent >= 0 ? "text-success" : "text-destructive"}`}>
                   {summary && summary.dailyPnlPercent >= 0 ? <TrendingUp className="w-3 h-3 inline mr-1" /> : <TrendingDown className="w-3 h-3 inline mr-1" />}
-                  {summary?.dailyPnlPercent.toFixed(2)}% today
+                  {summary?.dailyPnlPercent.toFixed(2)}% сегодня
                 </div>
               </>
             )}
@@ -141,17 +141,17 @@ export default function Home() {
 
         <Card className="bg-card border-card-border">
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Agent Status</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Статус агента</CardTitle>
             <Bot className="w-4 h-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             {isLoadingAgent ? <Skeleton className="h-8 w-24" /> : (
               <>
                 <div className="text-2xl font-bold text-card-foreground">
-                  {agentStatus?.totalTradesExecuted || 0} Trades
+                  {agentStatus?.totalTradesExecuted || 0} сделок
                 </div>
                 <div className="text-xs text-muted-foreground mt-1">
-                  Last run: {agentStatus?.lastRunAt ? format(new Date(agentStatus.lastRunAt), "HH:mm") : "Never"}
+                  Последний запуск: {agentStatus?.lastRunAt ? format(new Date(agentStatus.lastRunAt), "HH:mm") : "никогда"}
                 </div>
               </>
             )}
@@ -162,16 +162,16 @@ export default function Home() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Top Positions */}
         <div className="lg:col-span-2 space-y-4">
-          <h2 className="text-lg font-semibold tracking-tight">Top Positions</h2>
+          <h2 className="text-lg font-semibold tracking-tight">Топ позиций</h2>
           <Card className="bg-card border-card-border">
             <div className="p-0">
               <table className="w-full text-sm text-left">
                 <thead className="text-xs text-muted-foreground bg-muted/50 border-b border-border">
                   <tr>
-                    <th className="px-4 py-3 font-medium">Asset</th>
-                    <th className="px-4 py-3 font-medium text-right">Qty</th>
-                    <th className="px-4 py-3 font-medium text-right">Price</th>
-                    <th className="px-4 py-3 font-medium text-right">Value</th>
+                    <th className="px-4 py-3 font-medium">Бумага</th>
+                    <th className="px-4 py-3 font-medium text-right">Кол-во</th>
+                    <th className="px-4 py-3 font-medium text-right">Цена</th>
+                    <th className="px-4 py-3 font-medium text-right">Стоимость</th>
                     <th className="px-4 py-3 font-medium text-right">P&L</th>
                   </tr>
                 </thead>
@@ -179,7 +179,7 @@ export default function Home() {
                   {isLoadingPortfolio ? (
                     <tr><td colSpan={5} className="px-4 py-4 text-center"><Skeleton className="h-4 w-full" /></td></tr>
                   ) : portfolio?.positions.length === 0 ? (
-                    <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">No open positions</td></tr>
+                    <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">Открытых позиций нет</td></tr>
                   ) : (
                     portfolio?.positions.slice(0, 5).map((pos) => (
                       <tr key={pos.figi} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
@@ -208,13 +208,13 @@ export default function Home() {
 
         {/* Recent Activity */}
         <div className="space-y-4">
-          <h2 className="text-lg font-semibold tracking-tight">Recent Activity</h2>
+          <h2 className="text-lg font-semibold tracking-tight">Недавние сделки</h2>
           <Card className="bg-card border-card-border">
             <div className="p-4 space-y-4">
               {isLoadingLogs ? (
                 <Skeleton className="h-20 w-full" />
               ) : tradeLogs?.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground text-sm">No recent trades</div>
+                <div className="text-center py-8 text-muted-foreground text-sm">Сделок пока нет</div>
               ) : (
                 tradeLogs?.map((log) => (
                   <div key={log.id} className="flex flex-col space-y-1 pb-4 border-b border-border last:border-0 last:pb-0">
@@ -225,7 +225,7 @@ export default function Home() {
                           log.action === "sell" ? "border-destructive text-destructive" : 
                           "border-primary text-primary"
                         }>
-                          {log.action.toUpperCase()}
+                          {log.action === "buy" ? "ПОКУПКА" : log.action === "sell" ? "ПРОДАЖА" : log.action === "hold" ? "ДЕРЖАТЬ" : log.action.toUpperCase()}
                         </Badge>
                         <span className="font-semibold font-mono text-card-foreground">{log.ticker}</span>
                       </div>
