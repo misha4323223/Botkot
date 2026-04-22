@@ -336,11 +336,68 @@ export const GetAgentStatsResponse = zod.object({
       price: zod.number().nullish(),
       realizedPnl: zod.number().nullish(),
       createdAt: zod.string(),
+      currentPrice: zod.number().nullish(),
+      pnlNow: zod.number().nullish(),
+      pnlPct: zod.number().nullish(),
+      verdict: zod.enum(["good", "bad", "neutral", "early", "skipped"]),
+      verdictText: zod.string(),
     }),
   ),
   buyCount: zod.number(),
   sellCount: zod.number(),
   holdCount: zod.number(),
+  goodMoves: zod.number(),
+  badMoves: zod.number(),
+  earlyMoves: zod.number(),
+});
+
+/**
+ * @summary AI performance broken down by ticker
+ */
+export const GetPerTickerStatsResponse = zod.object({
+  mode: zod.string(),
+  tickers: zod.array(
+    zod.object({
+      ticker: zod.string(),
+      decisions: zod.number(),
+      buys: zod.number(),
+      sells: zod.number(),
+      holds: zod.number(),
+      closedTrades: zod.number(),
+      wins: zod.number(),
+      losses: zod.number(),
+      winRate: zod.number(),
+      realizedPnl: zod.number(),
+      unrealizedPnl: zod.number(),
+      totalPnl: zod.number(),
+      avgConfidence: zod.number(),
+      lastDecisionAt: zod.string(),
+      openLots: zod.number(),
+    }),
+  ),
+});
+
+/**
+ * @summary Cumulative realized P&L over time
+ */
+export const GetEquityCurveResponse = zod.object({
+  mode: zod.string(),
+  points: zod.array(
+    zod.object({
+      time: zod.string(),
+      pnl: zod.number(),
+      trade: zod.number(),
+    }),
+  ),
+  totalPnl: zod.number(),
+  tradesCount: zod.number(),
+});
+
+/**
+ * @summary Delete all paper-mode trade logs
+ */
+export const ResetPaperTradesResponse = zod.object({
+  deletedCount: zod.number(),
 });
 
 /**

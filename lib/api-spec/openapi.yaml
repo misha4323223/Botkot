@@ -379,6 +379,48 @@ paths:
               schema:
                 $ref: "#/components/schemas/AgentStats"
 
+  /agent/per-ticker-stats:
+    get:
+      operationId: getPerTickerStats
+      tags: [agent]
+      summary: AI performance broken down by ticker
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PerTickerStats"
+
+  /agent/equity-curve:
+    get:
+      operationId: getEquityCurve
+      tags: [agent]
+      summary: Cumulative realized P&L over time
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EquityCurve"
+
+  /agent/paper/reset:
+    delete:
+      operationId: resetPaperTrades
+      tags: [agent]
+      summary: Delete all paper-mode trade logs
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deletedCount: { type: integer }
+                required: [deletedCount]
+
   /agent/suggest-tickers:
     get:
       operationId: getSuggestedTickers
@@ -626,12 +668,29 @@ components:
                 type: ["number", "null"]
               createdAt:
                 type: string
-            required: [id, ticker, action, confidence, executed, reasoning, createdAt]
+              currentPrice:
+                type: ["number", "null"]
+              pnlNow:
+                type: ["number", "null"]
+              pnlPct:
+                type: ["number", "null"]
+              verdict:
+                type: string
+                enum: [good, bad, neutral, early, skipped]
+              verdictText:
+                type: string
+            required: [id, ticker, action, confidence, executed, reasoning, createdAt, verdict, verdictText]
         buyCount:
           type: integer
         sellCount:
           type: integer
         holdCount:
+          type: integer
+        goodMoves:
+          type: integer
+        badMoves:
+          type: integer
+        earlyMoves:
           type: integer
       required:
         - mode
@@ -653,6 +712,53 @@ components:
         - buyCount
         - sellCount
         - holdCount
+        - goodMoves
+        - badMoves
+        - earlyMoves
+
+    PerTickerStats:
+      type: object
+      properties:
+        mode: { type: string }
+        tickers:
+          type: array
+          items:
+            type: object
+            properties:
+              ticker: { type: string }
+              decisions: { type: integer }
+              buys: { type: integer }
+              sells: { type: integer }
+              holds: { type: integer }
+              closedTrades: { type: integer }
+              wins: { type: integer }
+              losses: { type: integer }
+              winRate: { type: number }
+              realizedPnl: { type: number }
+              unrealizedPnl: { type: number }
+              totalPnl: { type: number }
+              avgConfidence: { type: number }
+              lastDecisionAt: { type: string }
+              openLots: { type: integer }
+            required: [ticker, decisions, buys, sells, holds, closedTrades, wins, losses, winRate, realizedPnl, unrealizedPnl, totalPnl, avgConfidence, lastDecisionAt, openLots]
+      required: [mode, tickers]
+
+    EquityCurve:
+      type: object
+      properties:
+        mode: { type: string }
+        points:
+          type: array
+          items:
+            type: object
+            properties:
+              time: { type: string }
+              pnl: { type: number }
+              trade: { type: integer }
+            required: [time, pnl, trade]
+        totalPnl: { type: number }
+        tradesCount: { type: integer }
+      required: [mode, points, totalPnl, tradesCount]
 
     SuggestedTickers:
       type: object

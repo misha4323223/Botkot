@@ -370,61 +370,97 @@ export default function AgentPage() {
         </Card>
       )}
 
-      {/* НЕДАВНИЕ РЕШЕНИЯ */}
+      {/* НЕДАВНИЕ РЕШЕНИЯ + ОЦЕНКА ХОДА */}
       {stats && stats.recentDecisions.length > 0 && (
         <Card className="bg-card border-border">
           <CardHeader className="pb-2 pt-4 px-4">
-            <CardTitle className="text-base">Последние 15 решений</CardTitle>
+            <CardTitle className="text-base">Последние 15 решений — оценка хода</CardTitle>
             <CardDescription className="text-xs">
-              Что и почему ИИ решил по каждой бумаге
+              Сравниваем что ИИ решил с тем, что произошло с ценой потом
             </CardDescription>
           </CardHeader>
-          <CardContent className="px-0 pb-2">
+          <CardContent className="px-4 pb-3 pt-0 space-y-3">
+            {/* Score summary */}
+            <div className="grid grid-cols-3 gap-2">
+              <div className="rounded-md border border-green-600/30 bg-green-950/20 p-2 text-center">
+                <div className="text-xs text-muted-foreground">Хорошие ходы</div>
+                <div className="text-xl font-bold text-green-400">{stats.goodMoves}</div>
+              </div>
+              <div className="rounded-md border border-red-600/30 bg-red-950/20 p-2 text-center">
+                <div className="text-xs text-muted-foreground">Ошибки</div>
+                <div className="text-xl font-bold text-red-400">{stats.badMoves}</div>
+              </div>
+              <div className="rounded-md border border-border bg-muted/20 p-2 text-center">
+                <div className="text-xs text-muted-foreground">Рано судить</div>
+                <div className="text-xl font-bold text-muted-foreground">{stats.earlyMoves}</div>
+              </div>
+            </div>
+            {(stats.goodMoves + stats.badMoves) > 0 && (
+              <p className="text-[11px] text-muted-foreground text-center">
+                Точность ИИ на оценённых ходах: <span className="font-bold text-foreground">{Math.round(stats.goodMoves / (stats.goodMoves + stats.badMoves) * 100)}%</span>
+                {" "}({stats.goodMoves} из {stats.goodMoves + stats.badMoves})
+              </p>
+            )}
+          </CardContent>
+          <CardContent className="px-0 pb-2 pt-0">
             <div className="divide-y divide-border/50">
               {stats.recentDecisions.map(d => {
                 const Icon = d.action === "buy" ? CheckCircle2 : d.action === "sell" ? XCircle : MinusCircle;
                 const color = d.action === "buy" ? "text-green-500" : d.action === "sell" ? "text-red-500" : "text-muted-foreground";
                 const label = d.action === "buy" ? "ПОКУПКА" : d.action === "sell" ? "ПРОДАЖА" : "ДЕРЖАТЬ";
+                const verdictStyle =
+                  d.verdict === "good" ? "border-green-600/50 bg-green-950/30 text-green-400" :
+                  d.verdict === "bad" ? "border-red-600/50 bg-red-950/30 text-red-400" :
+                  d.verdict === "neutral" ? "border-border bg-muted/30 text-muted-foreground" :
+                  d.verdict === "skipped" ? "border-yellow-600/50 bg-yellow-950/20 text-yellow-400" :
+                  "border-border bg-muted/10 text-muted-foreground";
+                const verdictIcon = d.verdict === "good" ? "✅" : d.verdict === "bad" ? "❌" : d.verdict === "skipped" ? "⛔" : d.verdict === "early" ? "⏳" : "➖";
                 return (
-                  <div key={d.id} className="px-4 py-3">
-                    <div className="flex items-start justify-between gap-2 mb-1">
-                      <div className="flex items-center gap-2 min-w-0">
+                  <div key={d.id} className="px-4 py-3 space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0 flex-wrap">
                         <Icon className={`w-4 h-4 shrink-0 ${color}`} />
                         <span className="font-mono font-bold text-sm">{d.ticker}</span>
                         <span className={`text-xs font-medium ${color}`}>{label}</span>
-                        <span className="text-xs text-muted-foreground">{d.confidence}%</span>
-                        {d.executed && (
-                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-green-600/50 text-green-400">
-                            исполнено
-                          </Badge>
-                        )}
-                        {!d.executed && d.skipReason && (
-                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-yellow-600/50 text-yellow-400">
-                            пропуск
-                          </Badge>
-                        )}
+                        <span className="text-xs text-muted-foreground">уверенность {d.confidence}%</span>
                       </div>
                       <span className="text-[11px] text-muted-foreground font-mono shrink-0">
                         {format(new Date(d.createdAt), "d MMM HH:mm", { locale: ru })}
                       </span>
                     </div>
-                    {d.executed && d.quantity != null && d.price != null && (
-                      <p className="text-xs text-muted-foreground ml-6">
-                        {d.quantity} шт. × ₽{d.price.toFixed(2)} = ₽{(d.quantity * d.price).toFixed(2)}
-                        {d.realizedPnl != null && (
-                          <span className={`ml-2 font-mono ${d.realizedPnl >= 0 ? "text-green-500" : "text-red-500"}`}>
-                            ({d.realizedPnl >= 0 ? "+" : ""}{d.realizedPnl.toFixed(2)} ₽)
+
+                    {/* VERDICT badge — главный сигнал */}
+                    <div className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium ${verdictStyle}`}>
+                      <span>{verdictIcon}</span>
+                      <span>{d.verdictText}</span>
+                    </div>
+
+                    {/* Цена входа vs текущая */}
+                    {d.price != null && d.price > 0 && d.currentPrice != null && d.currentPrice > 0 && (
+                      <div className="text-[11px] text-muted-foreground flex items-center gap-2 flex-wrap">
+                        <span>Тогда: <span className="font-mono text-foreground">₽{d.price.toFixed(2)}</span></span>
+                        <span>→</span>
+                        <span>Сейчас: <span className="font-mono text-foreground">₽{d.currentPrice.toFixed(2)}</span></span>
+                        {d.pnlNow != null && d.action !== "hold" && (
+                          <span className={`font-mono font-bold ${d.pnlNow >= 0 ? "text-green-400" : "text-red-400"}`}>
+                            {d.pnlNow >= 0 ? "+" : ""}₽{d.pnlNow.toFixed(2)}
                           </span>
                         )}
+                      </div>
+                    )}
+
+                    {d.executed && d.quantity != null && d.price != null && (
+                      <p className="text-[11px] text-muted-foreground">
+                        Объём: {d.quantity} шт. × ₽{d.price.toFixed(2)} = ₽{(d.quantity * d.price).toFixed(2)}
                       </p>
                     )}
                     {d.skipReason && (
-                      <p className="text-xs text-yellow-300/80 ml-6 mt-0.5">
-                        Не сделал, потому что: {d.skipReason}
+                      <p className="text-xs text-yellow-300/80">
+                        Не сделал: {d.skipReason}
                       </p>
                     )}
                     {d.reasoning && (
-                      <p className="text-xs text-muted-foreground/80 ml-6 mt-1 line-clamp-2">{d.reasoning}</p>
+                      <p className="text-xs text-muted-foreground/80 line-clamp-2">{d.reasoning}</p>
                     )}
                   </div>
                 );

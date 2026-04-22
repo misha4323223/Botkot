@@ -24,15 +24,18 @@ import type {
   AnalyzeBody,
   ApiError,
   Candle,
+  EquityCurve,
   GetCandlesParams,
   HealthStatus,
   Instrument,
   LastPrice,
   ListTradeLogsParams,
   Order,
+  PerTickerStats,
   PlaceOrderBody,
   Portfolio,
   PortfolioSummary,
+  ResetPaperTrades200,
   SearchInstrumentsParams,
   Settings,
   SuggestedTickers,
@@ -1613,6 +1616,237 @@ export function useGetAgentStats<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * @summary AI performance broken down by ticker
+ */
+export const getGetPerTickerStatsUrl = () => {
+  return `/api/agent/per-ticker-stats`;
+};
+
+export const getPerTickerStats = async (
+  options?: RequestInit,
+): Promise<PerTickerStats> => {
+  return customFetch<PerTickerStats>(getGetPerTickerStatsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetPerTickerStatsQueryKey = () => {
+  return [`/api/agent/per-ticker-stats`] as const;
+};
+
+export const getGetPerTickerStatsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getPerTickerStats>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getPerTickerStats>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetPerTickerStatsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getPerTickerStats>>
+  > = ({ signal }) => getPerTickerStats({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getPerTickerStats>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetPerTickerStatsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getPerTickerStats>>
+>;
+export type GetPerTickerStatsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary AI performance broken down by ticker
+ */
+
+export function useGetPerTickerStats<
+  TData = Awaited<ReturnType<typeof getPerTickerStats>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getPerTickerStats>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetPerTickerStatsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Cumulative realized P&L over time
+ */
+export const getGetEquityCurveUrl = () => {
+  return `/api/agent/equity-curve`;
+};
+
+export const getEquityCurve = async (
+  options?: RequestInit,
+): Promise<EquityCurve> => {
+  return customFetch<EquityCurve>(getGetEquityCurveUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetEquityCurveQueryKey = () => {
+  return [`/api/agent/equity-curve`] as const;
+};
+
+export const getGetEquityCurveQueryOptions = <
+  TData = Awaited<ReturnType<typeof getEquityCurve>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getEquityCurve>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetEquityCurveQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getEquityCurve>>> = ({
+    signal,
+  }) => getEquityCurve({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getEquityCurve>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetEquityCurveQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getEquityCurve>>
+>;
+export type GetEquityCurveQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Cumulative realized P&L over time
+ */
+
+export function useGetEquityCurve<
+  TData = Awaited<ReturnType<typeof getEquityCurve>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getEquityCurve>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetEquityCurveQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Delete all paper-mode trade logs
+ */
+export const getResetPaperTradesUrl = () => {
+  return `/api/agent/paper/reset`;
+};
+
+export const resetPaperTrades = async (
+  options?: RequestInit,
+): Promise<ResetPaperTrades200> => {
+  return customFetch<ResetPaperTrades200>(getResetPaperTradesUrl(), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getResetPaperTradesMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof resetPaperTrades>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof resetPaperTrades>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["resetPaperTrades"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof resetPaperTrades>>,
+    void
+  > = () => {
+    return resetPaperTrades(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ResetPaperTradesMutationResult = NonNullable<
+  Awaited<ReturnType<typeof resetPaperTrades>>
+>;
+
+export type ResetPaperTradesMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Delete all paper-mode trade logs
+ */
+export const useResetPaperTrades = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof resetPaperTrades>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof resetPaperTrades>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getResetPaperTradesMutationOptions(options));
+};
 
 /**
  * @summary Curated MOEX tickers + AI-picked suggestions for the user's budget

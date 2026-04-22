@@ -87,6 +87,17 @@ export type AgentStatsAffordabilityItem = {
   canAffordLots: number;
 };
 
+export type AgentStatsRecentDecisionsItemVerdict =
+  (typeof AgentStatsRecentDecisionsItemVerdict)[keyof typeof AgentStatsRecentDecisionsItemVerdict];
+
+export const AgentStatsRecentDecisionsItemVerdict = {
+  good: "good",
+  bad: "bad",
+  neutral: "neutral",
+  early: "early",
+  skipped: "skipped",
+} as const;
+
 export type AgentStatsRecentDecisionsItem = {
   id: number;
   ticker: string;
@@ -103,6 +114,14 @@ export type AgentStatsRecentDecisionsItem = {
   /** @nullable */
   realizedPnl?: number | null;
   createdAt: string;
+  /** @nullable */
+  currentPrice?: number | null;
+  /** @nullable */
+  pnlNow?: number | null;
+  /** @nullable */
+  pnlPct?: number | null;
+  verdict: AgentStatsRecentDecisionsItemVerdict;
+  verdictText: string;
 };
 
 export interface AgentStats {
@@ -125,6 +144,45 @@ export interface AgentStats {
   buyCount: number;
   sellCount: number;
   holdCount: number;
+  goodMoves: number;
+  badMoves: number;
+  earlyMoves: number;
+}
+
+export type PerTickerStatsTickersItem = {
+  ticker: string;
+  decisions: number;
+  buys: number;
+  sells: number;
+  holds: number;
+  closedTrades: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  realizedPnl: number;
+  unrealizedPnl: number;
+  totalPnl: number;
+  avgConfidence: number;
+  lastDecisionAt: string;
+  openLots: number;
+};
+
+export interface PerTickerStats {
+  mode: string;
+  tickers: PerTickerStatsTickersItem[];
+}
+
+export type EquityCurvePointsItem = {
+  time: string;
+  pnl: number;
+  trade: number;
+};
+
+export interface EquityCurve {
+  mode: string;
+  points: EquityCurvePointsItem[];
+  totalPnl: number;
+  tradesCount: number;
 }
 
 export type SuggestedTickersTickersItem = {
@@ -367,4 +425,8 @@ export const GetCandlesInterval = {
 export type ListTradeLogsParams = {
   limit?: number;
   offset?: number;
+};
+
+export type ResetPaperTrades200 = {
+  deletedCount: number;
 };

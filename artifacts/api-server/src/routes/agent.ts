@@ -403,11 +403,77 @@ router.get("/agent/stats", async (_req, res): Promise<void> => {
     } catch { /* ignore */ }
   }
 
-  // Recent decisions (last 15) with parsed skipReason
-  const recentDecisions = all.slice(0, 15).map(r => {
+  // Recent decisions (last 15) with parsed skipReason + verdict
+  const recentRows = all.slice(0, 15);
+
+  // Fetch current prices for unique figis
+  const recentPrices = new Map<string, number>();
+  if (recentRows.length > 0 && s.token) {
+    try {
+      const figis = Array.from(new Set(recentRows.map(r => r.figi)));
+      const data = await tinkoffPost<{ lastPrices?: { figi?: string; price?: { units?: string; nano?: number } }[] }>(
+        "/tinkoff.public.invest.api.contract.v1.MarketDataService/GetLastPrices",
+        { figi: figis }, s.token, s.isSandbox,
+      );
+      for (const p of data.lastPrices ?? []) if (p.figi) recentPrices.set(p.figi, parseQuotation(p.price));
+    } catch { /* ignore */ }
+  }
+
+  type Verdict = "good" | "bad" | "neutral" | "early" | "skipped";
+  const recentDecisions = recentRows.map(r => {
     const reasoning = r.aiReasoning ?? "";
     const skipMatch = reasoning.match(/⛔\s*(.+?)(?:\n|$)/);
     const wasExecuted = (r.action === "buy" || r.action === "sell") && (r.success ?? false) && !skipMatch;
+    const currentPrice = recentPrices.get(r.figi) ?? null;
+    const entry = r.price ?? 0;
+    const qty = r.quantity ?? 0;
+    const ageMin = (Date.now() - r.createdAt.getTime()) / 60000;
+
+    let verdict: Verdict = "early";
+    let verdictText = "Рано судить";
+    let pnlNow: number | null = null;
+    let pnlPct: number | null = null;
+
+    if (!wasExecuted && r.action !== "hold") {
+      verdict = "skipped";
+      verdictText = "Не сделал";
+    } else if (r.action === "hold") {
+      // Compare entry (price logged at decision) vs current
+      if (entry > 0 && currentPrice && currentPrice > 0 && ageMin >= 30) {
+        const movePct = ((currentPrice - entry) / entry) * 100;
+        pnlPct = movePct;
+        if (Math.abs(movePct) < 0.5) { verdict = "good"; verdictText = "Правильно подождал"; }
+        else if (movePct > 1.5) { verdict = "bad"; verdictText = `Упустил рост +${movePct.toFixed(1)}%`; }
+        else if (movePct < -1.5) { verdict = "good"; verdictText = `Спасся от падения ${movePct.toFixed(1)}%`; }
+        else { verdict = "neutral"; verdictText = `Цена сдвинулась на ${movePct >= 0 ? "+" : ""}${movePct.toFixed(1)}%`; }
+      } else {
+        verdict = "early";
+        verdictText = entry > 0 ? "Ждём движения цены" : "Без цены — нечего сравнить";
+      }
+    } else if (wasExecuted && r.action === "buy") {
+      if (r.closedAt != null && r.realizedPnl != null) {
+        pnlNow = r.realizedPnl;
+        pnlPct = entry > 0 && qty > 0 ? (r.realizedPnl / (entry * qty)) * 100 : null;
+        if (r.realizedPnl > 0) { verdict = "good"; verdictText = `Закрыта в плюс ${pnlPct ? `(+${pnlPct.toFixed(1)}%)` : ""}`; }
+        else if (r.realizedPnl < 0) { verdict = "bad"; verdictText = `Закрыта в минус ${pnlPct ? `(${pnlPct.toFixed(1)}%)` : ""}`; }
+        else { verdict = "neutral"; verdictText = "Закрыта в ноль"; }
+      } else if (currentPrice && currentPrice > 0 && entry > 0 && qty > 0) {
+        pnlNow = (currentPrice - entry) * qty;
+        pnlPct = ((currentPrice - entry) / entry) * 100;
+        if (pnlPct > 1) { verdict = "good"; verdictText = `Пока в плюсе +${pnlPct.toFixed(1)}%`; }
+        else if (pnlPct < -1) { verdict = "bad"; verdictText = `Пока в минусе ${pnlPct.toFixed(1)}%`; }
+        else { verdict = "neutral"; verdictText = `Около входа (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(1)}%)`; }
+      }
+    } else if (wasExecuted && r.action === "sell") {
+      if (r.realizedPnl != null) {
+        pnlNow = r.realizedPnl;
+        pnlPct = entry > 0 && qty > 0 ? (r.realizedPnl / (entry * qty)) * 100 : null;
+        if (r.realizedPnl > 0) { verdict = "good"; verdictText = `Зафиксировал прибыль ${pnlPct ? `(+${pnlPct.toFixed(1)}%)` : ""}`; }
+        else if (r.realizedPnl < 0) { verdict = "bad"; verdictText = `Закрыл с убытком ${pnlPct ? `(${pnlPct.toFixed(1)}%)` : ""}`; }
+        else { verdict = "neutral"; verdictText = "Без прибыли"; }
+      }
+    }
+
     return {
       id: r.id,
       ticker: r.ticker,
@@ -420,8 +486,19 @@ router.get("/agent/stats", async (_req, res): Promise<void> => {
       price: r.price,
       realizedPnl: r.realizedPnl,
       createdAt: r.createdAt.toISOString(),
+      currentPrice,
+      pnlNow,
+      pnlPct,
+      verdict,
+      verdictText,
     };
   });
+
+  // Aggregate verdicts (only on judgable: good/bad)
+  const judgable = recentDecisions.filter(d => d.verdict === "good" || d.verdict === "bad");
+  const goodMoves = judgable.filter(d => d.verdict === "good").length;
+  const badMoves = judgable.filter(d => d.verdict === "bad").length;
+  const earlyMoves = recentDecisions.filter(d => d.verdict === "early").length;
 
   res.json({
     mode,
@@ -443,7 +520,99 @@ router.get("/agent/stats", async (_req, res): Promise<void> => {
     buyCount,
     sellCount,
     holdCount,
+    goodMoves,
+    badMoves,
+    earlyMoves,
   });
+});
+
+router.get("/agent/per-ticker-stats", async (_req, res): Promise<void> => {
+  const s = await getOrCreateSettings();
+  const mode: "paper" | "live" = s.paperMode ? "paper" : "live";
+  const all = await db.select().from(tradeLogsTable).where(eq(tradeLogsTable.mode, mode)).orderBy(desc(tradeLogsTable.createdAt));
+
+  const byTicker = new Map<string, {
+    ticker: string; figi: string; decisions: number; buys: number; sells: number; holds: number;
+    closedTrades: number; wins: number; losses: number; realizedPnl: number;
+    avgConfidence: number; confSum: number; confN: number; lastDecisionAt: string;
+    openLots: number; openValue: number;
+  }>();
+  for (const r of all) {
+    let b = byTicker.get(r.ticker);
+    if (!b) {
+      b = { ticker: r.ticker, figi: r.figi, decisions: 0, buys: 0, sells: 0, holds: 0,
+        closedTrades: 0, wins: 0, losses: 0, realizedPnl: 0,
+        avgConfidence: 0, confSum: 0, confN: 0, lastDecisionAt: r.createdAt.toISOString(),
+        openLots: 0, openValue: 0 };
+      byTicker.set(r.ticker, b);
+    }
+    b.decisions++;
+    if (r.action === "buy") b.buys++;
+    else if (r.action === "sell") b.sells++;
+    else if (r.action === "hold") b.holds++;
+    if ((r.confidence ?? 0) > 0) { b.confSum += r.confidence ?? 0; b.confN++; }
+    if (r.closedAt != null && r.realizedPnl != null) {
+      b.closedTrades++;
+      b.realizedPnl += r.realizedPnl;
+      if (r.realizedPnl > 0) b.wins++;
+      else if (r.realizedPnl < 0) b.losses++;
+    }
+    if (r.action === "buy" && r.success && r.closedAt == null && r.quantity != null && r.price != null) {
+      b.openLots += r.quantity;
+      b.openValue += r.quantity * r.price;
+    }
+  }
+
+  // Current prices for unrealized
+  const figis = Array.from(new Set(Array.from(byTicker.values()).filter(x => x.openLots > 0).map(x => x.figi)));
+  const priceMap = new Map<string, number>();
+  if (figis.length > 0 && s.token) {
+    try {
+      const data = await tinkoffPost<{ lastPrices?: { figi?: string; price?: { units?: string; nano?: number } }[] }>(
+        "/tinkoff.public.invest.api.contract.v1.MarketDataService/GetLastPrices",
+        { figi: figis }, s.token, s.isSandbox,
+      );
+      for (const p of data.lastPrices ?? []) if (p.figi) priceMap.set(p.figi, parseQuotation(p.price));
+    } catch { /* ignore */ }
+  }
+
+  const tickers = Array.from(byTicker.values()).map(b => {
+    b.avgConfidence = b.confN > 0 ? b.confSum / b.confN : 0;
+    const cur = priceMap.get(b.figi) ?? 0;
+    const unrealizedPnl = (cur > 0 && b.openLots > 0) ? cur * b.openLots - b.openValue : 0;
+    const winRate = b.closedTrades > 0 ? (b.wins / b.closedTrades) * 100 : 0;
+    const totalPnl = b.realizedPnl + unrealizedPnl;
+    return {
+      ticker: b.ticker, decisions: b.decisions, buys: b.buys, sells: b.sells, holds: b.holds,
+      closedTrades: b.closedTrades, wins: b.wins, losses: b.losses, winRate,
+      realizedPnl: b.realizedPnl, unrealizedPnl, totalPnl,
+      avgConfidence: b.avgConfidence, lastDecisionAt: b.lastDecisionAt,
+      openLots: b.openLots,
+    };
+  });
+  tickers.sort((a, b) => b.totalPnl - a.totalPnl);
+  res.json({ mode, tickers });
+});
+
+router.get("/agent/equity-curve", async (_req, res): Promise<void> => {
+  const s = await getOrCreateSettings();
+  const mode: "paper" | "live" = s.paperMode ? "paper" : "live";
+  // Take all closed trades, sort by closedAt asc, cumsum realizedPnl
+  const closed = await db.select().from(tradeLogsTable)
+    .where(and(eq(tradeLogsTable.mode, mode), isNotNull(tradeLogsTable.closedAt)))
+    .orderBy(tradeLogsTable.closedAt);
+  let acc = 0;
+  const points: Array<{ time: string; pnl: number; trade: number }> = [{ time: closed[0]?.closedAt?.toISOString() ?? new Date().toISOString(), pnl: 0, trade: 0 }];
+  closed.forEach((c, i) => {
+    acc += c.realizedPnl ?? 0;
+    points.push({ time: c.closedAt!.toISOString(), pnl: acc, trade: i + 1 });
+  });
+  res.json({ mode, points, totalPnl: acc, tradesCount: closed.length });
+});
+
+router.delete("/agent/paper/reset", async (_req, res): Promise<void> => {
+  const deleted = await db.delete(tradeLogsTable).where(eq(tradeLogsTable.mode, "paper")).returning({ id: tradeLogsTable.id });
+  res.json({ deletedCount: deleted.length });
 });
 
 // Curated list of liquid MOEX stocks
