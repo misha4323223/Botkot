@@ -12,7 +12,30 @@ async function getOrCreateSettings() {
   if (!row) {
     [row] = await db.insert(settingsTable).values({}).returning();
   }
-  return { ...row, token: decryptString(row.token) };
+  const token = decryptString(row.token);
+
+  // Lazy auto-detect accountId: if a token exists but accountId is blank
+  // (user pasted token but never picked an account), pick the first OPEN
+  // brokerage account from Tinkoff and persist it. Silent fail — caller
+  // routes will still return their own 400 if account remains missing.
+  if (token && (!row.accountId || row.accountId === "")) {
+    try {
+      const acc = await tinkoffPost<{ accounts?: { id: string; status?: string; type?: string }[] }>(
+        "/tinkoff.public.invest.api.contract.v1.UsersService/GetAccounts",
+        {}, token, row.isSandbox ?? false,
+      );
+      const list = acc.accounts ?? [];
+      const open = list.find(a => a.status === "ACCOUNT_STATUS_OPEN") ?? list[0];
+      if (open?.id) {
+        await db.update(settingsTable).set({ accountId: open.id });
+        row = { ...row, accountId: open.id };
+      }
+    } catch {
+      // ignore — UI / agent will surface a clearer error
+    }
+  }
+
+  return { ...row, token };
 }
 
 function publicView(s: Awaited<ReturnType<typeof getOrCreateSettings>>) {
