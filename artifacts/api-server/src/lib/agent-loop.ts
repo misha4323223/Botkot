@@ -5,9 +5,19 @@ import { agentState } from "./agent-state";
 import { tinkoffPost, parseQuotation, parseMoneyValue } from "./tinkoff";
 import { logger } from "./logger";
 import { withRetry } from "./openai-retry";
-import { computeSnapshot, interpretSnapshot, type Candle, type IndicatorSnapshot } from "./indicators";
+import { computeSnapshot, interpretSnapshot, computeTapeSignals, formatTapeSignals, type Candle, type IndicatorSnapshot } from "./indicators";
 import { getNewsForTicker, formatNewsForPrompt } from "./news";
+import { getOrderBookL1, formatOrderBookForPrompt, type OrderBookL1 } from "./orderbook";
+import { computeSectorExposure, formatSectorExposureForPrompt, checkSectorCap, getSector } from "./sectors";
 import { randomUUID } from "crypto";
+
+// Hard caps applied mechanically regardless of what the LLM reports.
+// Spread above this kills the trade (thin/illiquid order book).
+const MAX_SPREAD_PCT = 0.5;
+// One sector cannot exceed this share of total equity.
+const SECTOR_CAP_PCT = 35;
+// Live limit orders left hanging this long are auto-cancelled.
+const ORDER_TIMEOUT_MIN = 5;
 
 const IMOEX_FIGI = "BBG004730ZJ9";
 
@@ -386,9 +396,55 @@ async function reconcileLivePositions(s: Awaited<ReturnType<typeof getOrCreateSe
 }
 
 /**
+ * Cancel live limit orders that have been hanging unfilled for longer than
+ * ORDER_TIMEOUT_MIN. Hanging orders block cash and become stale — better to
+ * cancel and let the next agent cycle re-evaluate at current prices.
+ */
+async function cancelStaleOrders(s: Awaited<ReturnType<typeof getOrCreateSettingsForLoop>>): Promise<void> {
+  if (!s.token || !s.accountId) return;
+  try {
+    const data = await tinkoffPost<{ orders?: Array<{
+      orderId?: string; figi?: string; orderDate?: string;
+      executionReportStatus?: string; lotsRequested?: string; lotsExecuted?: string;
+    }> }>(
+      "/tinkoff.public.invest.api.contract.v1.OrdersService/GetOrders",
+      { accountId: s.accountId },
+      s.token,
+      s.isSandbox ?? false,
+    );
+    const orders = data.orders ?? [];
+    const cutoff = Date.now() - ORDER_TIMEOUT_MIN * 60 * 1000;
+
+    for (const o of orders) {
+      if (!o.orderId || !o.orderDate) continue;
+      const status = o.executionReportStatus ?? "";
+      // Active = NEW or PARTIALLY_FILL
+      if (status !== "EXECUTION_REPORT_STATUS_NEW" && status !== "EXECUTION_REPORT_STATUS_PARTIALLYFILL") continue;
+      const placed = new Date(o.orderDate).getTime();
+      if (placed > cutoff) continue;
+      try {
+        await tinkoffPost(
+          "/tinkoff.public.invest.api.contract.v1.OrdersService/CancelOrder",
+          { accountId: s.accountId, orderId: o.orderId },
+          s.token,
+          s.isSandbox ?? false,
+        );
+        const ageMin = Math.round((Date.now() - placed) / 60000);
+        logger.info({ orderId: o.orderId, figi: o.figi, ageMin, status }, "Stale order cancelled");
+      } catch (err) {
+        logger.warn({ err, orderId: o.orderId }, "Failed to cancel stale order");
+      }
+    }
+  } catch (err) {
+    logger.warn({ err }, "cancelStaleOrders: GetOrders failed");
+  }
+}
+
+/**
  * Position watcher cycle — runs frequently (every 60s) independently of the
  * main agent cycle. Closes paper positions in-DB and live positions via
- * Tinkoff orders when SL/TP levels are touched.
+ * Tinkoff orders when SL/TP levels are touched. Also cancels stale live
+ * limit orders that have been hanging unfilled.
  */
 export async function runPositionWatcherCycle(): Promise<void> {
   const s = await getOrCreateSettingsForLoop();
@@ -410,8 +466,11 @@ export async function runPositionWatcherCycle(): Promise<void> {
     }
   }
 
-  // Live: separate path because closing requires a real order
-  await reconcileLivePositions(s);
+  // Live: SL/TP execution + stale order cleanup
+  await Promise.all([
+    reconcileLivePositions(s),
+    cancelStaleOrders(s),
+  ]);
 }
 
 /**
@@ -419,8 +478,49 @@ export async function runPositionWatcherCycle(): Promise<void> {
  * Bucketizes by reported confidence and reports realized win-rate per bucket.
  * Returned as a short Russian text block to inject into the LLM prompt as a
  * self-reflection tool — counters overconfidence by showing the model how
- * its high-confidence calls have actually performed.
+ * its high-confidence calls have actually performed. Also used by
+ * applyCalibrationCap to mechanically clamp overconfident predictions.
  */
+async function getCalibrationStats(mode: "paper" | "live"): Promise<Array<{ lo: number; hi: number; n: number; winRate: number }>> {
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const closed = await db.select().from(tradeLogsTable).where(and(
+    eq(tradeLogsTable.mode, mode),
+    gte(tradeLogsTable.createdAt, since),
+  ));
+  const settled = closed.filter(r => r.closedAt != null && r.realizedPnl != null && (r.action === "buy" || r.action === "sell"));
+  const buckets = [
+    { lo: 90, hi: 101 }, { lo: 80, hi: 90 }, { lo: 70, hi: 80 }, { lo: 0, hi: 70 },
+  ];
+  return buckets.map(b => {
+    const inB = settled.filter(r => (r.confidence ?? 0) >= b.lo && (r.confidence ?? 0) < b.hi);
+    const wins = inB.filter(r => (r.realizedPnl ?? 0) > 0).length;
+    return { lo: b.lo, hi: b.hi, n: inB.length, winRate: inB.length > 0 ? (wins / inB.length) * 100 : -1 };
+  });
+}
+
+/**
+ * Mechanical confidence cap based on historical calibration. If the LLM says
+ * 95% but its 90-100% bucket has only 40% win-rate (n>=5), we clamp the
+ * effective confidence down toward that win-rate. This is the only reliable
+ * way to fight overconfidence — relying on the model to self-correct doesn't
+ * work in practice. Returns the capped value plus a human-readable reason
+ * (or null if no capping applied).
+ */
+function applyCalibrationCap(rawConfidence: number, stats: Array<{ lo: number; hi: number; n: number; winRate: number }>): { effective: number; reason: string | null } {
+  const bucket = stats.find(b => rawConfidence >= b.lo && rawConfidence < b.hi);
+  if (!bucket || bucket.n < 5 || bucket.winRate < 0) return { effective: rawConfidence, reason: null };
+  // Blend: effective = 0.6 * historical winRate + 0.4 * raw, but never above raw.
+  const blended = Math.round(0.6 * bucket.winRate + 0.4 * rawConfidence);
+  const effective = Math.min(rawConfidence, blended);
+  if (effective < rawConfidence - 2) {
+    return {
+      effective,
+      reason: `калибровка (${bucket.lo}-${bucket.hi - 1}% win-rate ${bucket.winRate.toFixed(0)}%, n=${bucket.n}) → уверенность снижена ${rawConfidence}→${effective}%`,
+    };
+  }
+  return { effective: rawConfidence, reason: null };
+}
+
 async function getCalibrationSummary(mode: "paper" | "live"): Promise<string> {
   const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const closed = await db.select().from(tradeLogsTable).where(and(
@@ -581,11 +681,13 @@ interface CycleResult {
 }
 
 async function analyzeOneTicker(target: { figi: string; ticker: string }, s: Awaited<ReturnType<typeof getOrCreateSettingsForLoop>>, ctx: AccountCtx, indexSnap: IndicatorSnapshot | null): Promise<CycleResult> {
+  const mode: "paper" | "live" = s.paperMode ? "paper" : "live";
+
   // Fetch candles
   const dailyCandles = await fetchCandles(target.figi, s.token!, s.isSandbox ?? false, "CANDLE_INTERVAL_DAY", 60);
   const hourlyCandles = await fetchCandles(target.figi, s.token!, s.isSandbox ?? false, "CANDLE_INTERVAL_HOUR", 5);
   if (dailyCandles.length < 20) {
-    return { ticker: target.ticker, decision: "hold", confidence: 0, executed: false, skipReason: "недостаточно истории", mode: s.paperMode ? "paper" : "live" };
+    return { ticker: target.ticker, decision: "hold", confidence: 0, executed: false, skipReason: "недостаточно истории", mode };
   }
   const dailySnap = computeSnapshot(dailyCandles);
   const hourlySnap = hourlyCandles.length >= 10 ? computeSnapshot(hourlyCandles) : null;
@@ -603,11 +705,23 @@ async function analyzeOneTicker(target: { figi: string; ticker: string }, s: Awa
   const dailyNotes = interpretSnapshot(dailySnap);
   const hourlyNotes = hourlySnap ? interpretSnapshot(hourlySnap) : [];
 
-  const news = await getNewsForTicker(target.ticker);
+  // Parallel fetch: news + order book + calibration + lessons + tape signals
+  const [news, orderBook, calibrationBlock, lessonsBlock, calibrationStats] = await Promise.all([
+    getNewsForTicker(target.ticker),
+    getOrderBookL1(target.figi, s.token!, s.isSandbox ?? false, 5),
+    getCalibrationSummary(mode),
+    getLessonsForPrompt(target.ticker),
+    getCalibrationStats(mode),
+  ]);
   const newsBlock = formatNewsForPrompt(news);
+  const orderBookBlock = formatOrderBookForPrompt(orderBook, lot);
+  const tapeSignals = computeTapeSignals(hourlyCandles);
+  const tapeBlock = formatTapeSignals(tapeSignals);
 
-  const calibrationBlock = await getCalibrationSummary(s.paperMode ? "paper" : "live");
-  const lessonsBlock = await getLessonsForPrompt(target.ticker);
+  // Sector exposure of current portfolio
+  const sectorExposure = computeSectorExposure(ctx.positions, ctx.cashRub);
+  const sectorBlock = formatSectorExposureForPrompt(sectorExposure);
+  const targetSector = getSector(target.ticker);
 
   const indexLine = indexSnap
     ? `IMOEX за тот же период: изм. ${indexSnap.changePct.toFixed(1)}%, тренд ${indexSnap.trend}. Бумага vs индекс: ${(dailySnap.changePct - indexSnap.changePct >= 0 ? "+" : "")}${(dailySnap.changePct - indexSnap.changePct).toFixed(1)}%`
@@ -632,7 +746,7 @@ async function analyzeOneTicker(target: { figi: string; ticker: string }, s: Awa
 — Учитывай ВСЕ предоставленные сигналы (свечи, индикаторы, новости, журнал уроков, калибровка), а не один-два.
 
 ПРИНЦИПЫ
-— Уверенность = реальная вероятность правильного направления. Не завышай. Если данные противоречивы — снижай уверенность.
+— Уверенность = реальная вероятность правильного направления. Не завышай. Если данные противоречивы — снижай уверенность. Уверенность 90+% оставляй для случаев, где сходятся минимум 4 независимых сигнала (тренд+техника+новости+стакан/тейп).
 — RSI/MACD/Bollinger Bands/объём интерпретируй комплексно. Один индикатор ≠ сигнал.
 — Новости и корпоративные события (дивиденды, отчёты, санкции) могут перевесить технику.
 — При высокой волатильности или неопределённости — HOLD, а не агрессивная сделка.
@@ -640,6 +754,20 @@ async function analyzeOneTicker(target: { figi: string; ticker: string }, s: Awa
 — Никогда не покупай без свободного кэша. Никогда не продавай без позиции.
 — Журнал уроков — это твоя память о прошлых ошибках. Игнорировать его глупо.
 — Калибровочный блок — твоё зеркало. Если высокая уверенность в прошлом давала низкий win-rate — снижай уверенность сейчас.
+
+СТАКАН И ЛИКВИДНОСТЬ
+— Если спред > 0.3% — рынок тонкий, входы дороги. Учитывай это в уверенности и в выборе цены.
+— Дисбаланс топ-5 уровней показывает кто давит сейчас. Покупать против сильного дисбаланса продавцов — рисково.
+— Малое количество лотов на бид/аск — твой ордер сам сдвинет цену.
+
+КОРРЕЛЯЦИИ И ДИВЕРСИФИКАЦИЯ
+— Перед buy смотри на текущее распределение по секторам. Концентрация >35% капитала в одном секторе = плохая диверсификация (нефтегаз/банки/металлургия движутся синхронно).
+— Если в портфеле уже 2+ бумаги одного сектора — для новой покупки в том же секторе нужен ОЧЕНЬ сильный сигнал.
+
+ТЕЙП И МИКРОСТРУКТУРА
+— Краткосрочный импульс + всплеск объёма + решительные full-body бары = сильный сигнал продолжения.
+— Длинные тени и затухающий объём = нерешительность, лучше подождать.
+— Серия из 3+ однонаправленных баров обычно требует разворотного триггера, а не входа в продолжение на максимуме.
 
 ФОРМАТ ОТВЕТА
 Отвечай ТОЛЬКО валидным JSON-объектом без markdown-обёртки, без преамбулы, без пояснений вокруг:
@@ -653,19 +781,30 @@ async function analyzeOneTicker(target: { figi: string; ticker: string }, s: Awa
 — Свободно: ${ctx.cashRub.toFixed(2)} ₽
 — По бумаге ${target.ticker} у тебя сейчас: ${myPosition ? `${myPosition.qty} шт. @ ${myPosition.avg.toFixed(2)}₽` : "0 шт."}`;
 
-  const userPrompt = `Бумага: ${target.ticker} (${target.figi})
-Текущая цена: ${currentPrice.toFixed(2)} ₽, лот: ${lot}
+  const userPrompt = `Бумага: ${target.ticker} (${target.figi}) | Сектор: ${targetSector}
+Текущая цена: ${currentPrice.toFixed(2)} ₽
 ${myPosition ? `По этой бумаге: ${myPosition.qty} шт. @ ${myPosition.avg.toFixed(2)}, P&L ${myPosition.pnl.toFixed(2)}₽` : "Позиции нет."}
-Все позиции:
-${positionsSummary}
 
-ДНЕВНЫЕ (60д, ${dailyCandles.length} свечей): изм. ${dailySnap.changePct.toFixed(1)}%, диапазон ${dailySnap.rangeMin.toFixed(2)}–${dailySnap.rangeMax.toFixed(2)}, тренд ${dailySnap.trend}
+═══ СТАКАН (top-5) ═══
+${orderBookBlock}
+
+═══ ТЕЙП (последние часовые бары) ═══
+${tapeBlock}
+
+═══ ДНЕВНЫЕ СВЕЧИ (60д, ${dailyCandles.length} свечей) ═══
+изм. ${dailySnap.changePct.toFixed(1)}%, диапазон ${dailySnap.rangeMin.toFixed(2)}–${dailySnap.rangeMax.toFixed(2)}, тренд ${dailySnap.trend}
 ${dailyNotes.map(n => `• ${n}`).join("\n")}
 
-${hourlySnap ? `ЧАСОВЫЕ (5д, ${hourlyCandles.length} свечей): изм. ${hourlySnap.changePct.toFixed(1)}%, тренд ${hourlySnap.trend}
+${hourlySnap ? `═══ ЧАСОВЫЕ СВЕЧИ (5д, ${hourlyCandles.length} свечей) ═══
+изм. ${hourlySnap.changePct.toFixed(1)}%, тренд ${hourlySnap.trend}
 ${hourlyNotes.map(n => `• ${n}`).join("\n")}` : "Часовые свечи недоступны."}
 
 ${indexLine}
+
+═══ ПОРТФЕЛЬ ПО СЕКТОРАМ ═══
+${sectorBlock}
+Все позиции:
+${positionsSummary}
 
 ═══ СВЕЖИЕ НОВОСТИ ПО БУМАГЕ ═══
 ${newsBlock}
@@ -700,20 +839,31 @@ ${logCtx}`;
     await db.insert(tradeLogsTable).values({
       figi: target.figi, ticker: target.ticker, action: "hold",
       aiReasoning: `Невалидный ответ модели: ${raw.slice(0, 300)}`,
-      mode: s.paperMode ? "paper" : "live",
+      mode,
       confidence: 0, success: true,
     });
-    return { ticker: target.ticker, decision: "hold", confidence: 0, executed: false, skipReason: "невалидный JSON", mode: s.paperMode ? "paper" : "live" };
+    return { ticker: target.ticker, decision: "hold", confidence: 0, executed: false, skipReason: "невалидный JSON", mode };
   }
 
-  const mode: "paper" | "live" = s.paperMode ? "paper" : "live";
-  const confidence = parsed.confidence;
   const decision = parsed.decision;
-  const signalsJson = JSON.stringify({ daily: dailySnap, hourly: hourlySnap, index: indexSnap });
-  const reasoning = parsed.reasoning || raw;
+  const rawConfidence = parsed.confidence;
 
-  agentState.lastAction = `${decision.toUpperCase()} ${target.ticker} (${confidence}%, ${mode})`;
-  logger.info({ ticker: target.ticker, decision, confidence, mode }, "Agent decision");
+  // Mechanical calibration cap — clamp overconfident predictions based on
+  // historical win-rate per bucket. The LLM cannot be trusted to self-correct
+  // overconfidence, so we do it deterministically.
+  const calCap = applyCalibrationCap(rawConfidence, calibrationStats);
+  const confidence = calCap.effective;
+  const signalsJson = JSON.stringify({
+    daily: dailySnap, hourly: hourlySnap, index: indexSnap,
+    orderBook, tape: tapeSignals, sectorExposure,
+    rawConfidence, calibrationCap: calCap.reason,
+  });
+  const reasoningParts = [parsed.reasoning || raw];
+  if (calCap.reason) reasoningParts.push(`📉 ${calCap.reason}`);
+  const reasoning = reasoningParts.join("\n");
+
+  agentState.lastAction = `${decision.toUpperCase()} ${target.ticker} (${confidence}%${calCap.reason ? "*" : ""}, ${mode})`;
+  logger.info({ ticker: target.ticker, decision, rawConfidence, confidence, capped: !!calCap.reason, mode }, "Agent decision");
 
   // Below threshold or hold → log and return
   if (decision === "hold" || confidence < s.confidenceThreshold) {
@@ -723,6 +873,20 @@ ${logCtx}`;
       mode, confidence, success: true,
     });
     return { ticker: target.ticker, decision, confidence, executed: false, skipReason: decision === "hold" ? undefined : `уверенность ${confidence}% < ${s.confidenceThreshold}%`, mode };
+  }
+
+  // Hard liquidity gate — if spread is too wide we'd lose more on entry/exit
+  // than the trade can earn. Reject regardless of LLM confidence.
+  if (decision === "buy" || decision === "sell") {
+    if (orderBook && orderBook.spreadPct > MAX_SPREAD_PCT) {
+      const skipMsg = `спред ${orderBook.spreadPct.toFixed(2)}% > лимит ${MAX_SPREAD_PCT}% — тонкий рынок`;
+      await db.insert(tradeLogsTable).values({
+        figi: target.figi, ticker: target.ticker, action: "hold",
+        aiReasoning: `${reasoning}\n\n⛔ ${skipMsg}`,
+        signals: signalsJson, mode, confidence, success: true,
+      });
+      return { ticker: target.ticker, decision, confidence, executed: false, skipReason: skipMsg, mode };
+    }
   }
 
   // Daily limits
@@ -754,6 +918,16 @@ ${logCtx}`;
       const lotPrice = currentPrice * lot;
       lots = Math.floor(budget / lotPrice);
       if (lots <= 0) skipReason = `нужно ${lotPrice.toFixed(2)}₽ за лот, бюджет ${budget.toFixed(2)}₽`;
+      else {
+        // Sector concentration cap: don't allow this buy to push the sector
+        // above SECTOR_CAP_PCT of total equity.
+        const addRub = lots * lot * currentPrice;
+        const sectorMsg = checkSectorCap({
+          ticker: target.ticker, addRub, exposure: sectorExposure,
+          cashRub: ctx.cashRub, capPct: SECTOR_CAP_PCT,
+        });
+        if (sectorMsg) skipReason = sectorMsg;
+      }
     }
   } else {
     if (!myPosition || myPosition.qty <= 0) skipReason = "нет позиции для продажи";
@@ -799,9 +973,18 @@ ${logCtx}`;
     return { ticker: target.ticker, decision, confidence, executed: false, skipReason: market.reason, mode };
   }
 
-  // Limit order with priceLimitPercent slippage
+  // Limit price: prefer order book if available (buy at ask + tiny pad / sell
+  // at bid - tiny pad). Falls back to currentPrice ± priceLimitPercent.
   const slip = s.priceLimitPercent / 100;
-  const limitPrice = decision === "buy" ? currentPrice * (1 + slip) : currentPrice * (1 - slip);
+  let limitPrice: number;
+  if (orderBook) {
+    const pad = Math.min(slip, 0.003); // up to 0.3% pad on top of touch
+    limitPrice = decision === "buy"
+      ? orderBook.ask * (1 + pad)
+      : orderBook.bid * (1 - pad);
+  } else {
+    limitPrice = decision === "buy" ? currentPrice * (1 + slip) : currentPrice * (1 - slip);
+  }
   const units = Math.floor(limitPrice);
   const nano = Math.round((limitPrice - units) * 1e9);
 

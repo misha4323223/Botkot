@@ -220,6 +220,43 @@ both intervals registered; first agent cycle ran (Agent decision SBER hold
   (финальные дивиденды 110 ₽). For thin names without coverage (RUAL, SVCB,
   LNZLP) returns empty block instead of hallucinating.
 
+### 2026-04-23 — 5 weaknesses addressed (overconfidence, spread, sector, tape, stale orders)
+1. **Overconfidence cap** — `getCalibrationStats` returns per-bucket realized
+   win-rates; `applyCalibrationCap` mechanically blends 60% historical +
+   40% raw confidence (capped by raw, only when bucket n≥5). Effective vs raw
+   confidence both stored in signals JSON. Reasoning gets a `📉` line when
+   clamped.
+2. **Order book / spread** — `lib/orderbook.ts` calls `GetOrderBook` (depth=5)
+   for every ticker, formats top-5 bids/asks + spread% + imbalance into the
+   prompt under `СТАКАН`. Hard gate `MAX_SPREAD_PCT=0.5` forces HOLD on
+   wide-spread names regardless of LLM confidence. Live limit-order pricing
+   now uses the actual ask/bid touch + tiny pad instead of `currentPrice ±
+   slippage`.
+3. **Stale orders** — watcher cycle now also calls `GetOrders` and cancels
+   any NEW/PARTIALLY_FILL order older than `ORDER_TIMEOUT_MIN=5`.
+4. **Sector concentration** — `lib/sectors.ts` ships ~80-ticker MOEX
+   sector map. `computeSectorExposure` runs each cycle, the breakdown goes
+   into the prompt under `ПОРТФЕЛЬ ПО СЕКТОРАМ`, and `checkSectorCap`
+   blocks live buys that would push any sector over `SECTOR_CAP_PCT=35%`.
+5. **Tape signals** — `computeTapeSignals` in `lib/indicators.ts` derives
+   short-window momentum, per-bar velocity, volume burst ratio,
+   body-to-range %, consecutive-bar streak. Surfaced in prompt under `ТЕЙП`.
+
+System prompt extended with three new principle sections (`СТАКАН И
+ЛИКВИДНОСТЬ`, `КОРРЕЛЯЦИИ И ДИВЕРСИФИКАЦИЯ`, `ТЕЙП И МИКРОСТРУКТУРА`) and
+a tighter overconfidence rule (90+% confidence requires ≥4 independent
+confluences). The whole static block is still served from Anthropic prompt
+cache.
+
+Also fixed: `accountId` lazy auto-detect in `getOrCreateSettings` and
+`getOrCreateSettingsForLoop` — fetches first OPEN account on demand. Cleared
+duplicate settings row.
+
+Self-rated trading strength: was 3-4/10 (overconfident, no microstructure,
+no risk awareness beyond per-trade SL/TP). Should now sit at 5-6/10 — there
+is real liquidity and concentration discipline, and overconfidence is
+mechanically curbed even if the LLM ignores its own calibration block.
+
 ### Known gaps / next priorities (discussed 2026-04-22, not yet implemented)
 1. **Stop-loss / take-profit executor** — AI emits levels but no watcher
    enforces them between cycles. Need a 30–60s polling loop on open positions

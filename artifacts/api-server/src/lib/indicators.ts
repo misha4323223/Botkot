@@ -139,6 +139,72 @@ export function computeSnapshot(candles: Candle[]): IndicatorSnapshot {
   };
 }
 
+export interface TapeSignals {
+  shortMomentumPct: number;     // last 3 hourly bars vs prior 3
+  velocityPctPerBar: number;     // avg per-bar % change last 3 bars
+  volumeBurstRatio: number;      // last 3 bars vol vs avg of prior 10
+  bodyToRangePct: number;        // |close-open|/(high-low) of last bar — conviction
+  consecutiveSameDir: number;    // signed: +N up, -N down
+}
+
+/**
+ * Tape-like microstructure signals derived from short timeframe candles.
+ * These approximate what a discretionary trader feels from the tape:
+ * - Is price accelerating or stalling?
+ * - Is volume confirming or fading?
+ * - Are bars decisive (full-body) or indecisive (long wicks)?
+ * Pass ~5-20 hourly candles. Returns null if too few.
+ */
+export function computeTapeSignals(candles: Candle[]): TapeSignals | null {
+  if (candles.length < 7) return null;
+  const recent = candles.slice(-3);
+  const prior = candles.slice(-6, -3);
+  const recentClose = recent[recent.length - 1].close;
+  const priorClose = prior[prior.length - 1].close;
+  const startClose = prior[0].open;
+
+  const shortMomentumPct = priorClose > 0 ? ((recentClose - priorClose) / priorClose) * 100 : 0;
+  const velocityPctPerBar = startClose > 0 ? (((recentClose - startClose) / startClose) * 100) / 6 : 0;
+
+  const recentVol = recent.reduce((a, c) => a + c.volume, 0) / 3;
+  const olderTen = candles.slice(-13, -3);
+  const olderAvgVol = olderTen.length > 0
+    ? olderTen.reduce((a, c) => a + c.volume, 0) / olderTen.length
+    : recentVol;
+  const volumeBurstRatio = olderAvgVol > 0 ? recentVol / olderAvgVol : 1;
+
+  const lastBar = candles[candles.length - 1];
+  const range = Math.max(0.0001, lastBar.high - lastBar.low);
+  const body = Math.abs(lastBar.close - lastBar.open);
+  const bodyToRangePct = (body / range) * 100;
+
+  // Count consecutive same-direction bars from the end
+  let consecutiveSameDir = 0;
+  const lastDir = Math.sign(lastBar.close - lastBar.open);
+  for (let i = candles.length - 1; i >= 0; i--) {
+    const c = candles[i];
+    if (Math.sign(c.close - c.open) === lastDir && lastDir !== 0) consecutiveSameDir++;
+    else break;
+  }
+  consecutiveSameDir *= lastDir;
+
+  return { shortMomentumPct, velocityPctPerBar, volumeBurstRatio, bodyToRangePct, consecutiveSameDir };
+}
+
+export function formatTapeSignals(t: TapeSignals | null): string {
+  if (!t) return "Тейп-сигналы недоступны (мало часовых свечей).";
+  const dirArrow = t.shortMomentumPct > 0.3 ? "↑" : t.shortMomentumPct < -0.3 ? "↓" : "→";
+  const burstLabel = t.volumeBurstRatio > 2 ? "ВСПЛЕСК" : t.volumeBurstRatio > 1.3 ? "повышенный" : t.volumeBurstRatio < 0.6 ? "затухание" : "нормальный";
+  const convictionLabel = t.bodyToRangePct > 70 ? "решительный (full body)" : t.bodyToRangePct < 30 ? "нерешительный (длинные тени)" : "умеренный";
+  const streakLabel = Math.abs(t.consecutiveSameDir) >= 3
+    ? `серия ${Math.abs(t.consecutiveSameDir)} баров ${t.consecutiveSameDir > 0 ? "вверх" : "вниз"}`
+    : "без устойчивой серии";
+  return `Краткосрочное движение: ${dirArrow} ${t.shortMomentumPct >= 0 ? "+" : ""}${t.shortMomentumPct.toFixed(2)}% за 3 бара (скорость ${t.velocityPctPerBar.toFixed(2)}%/бар)
+Объём посл.3 баров: ×${t.volumeBurstRatio.toFixed(1)} от среднего → ${burstLabel}
+Последний бар: тело ${t.bodyToRangePct.toFixed(0)}% диапазона → ${convictionLabel}
+Импульс: ${streakLabel}`;
+}
+
 export function interpretSnapshot(s: IndicatorSnapshot): string[] {
   const notes: string[] = [];
   if (s.rsi14 >= 70) notes.push(`RSI=${s.rsi14.toFixed(0)} → перекупленность (риск отката вниз)`);
